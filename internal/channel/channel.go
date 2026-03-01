@@ -68,7 +68,18 @@ func (r *Router) Start() error {
 
 // HandleIncoming is called by channels when a new message arrives
 func (r *Router) HandleIncoming(msg Message) {
-	// 1. Check for routing commands FIRST
+	// 1. Check for pairing commands for ALL users
+	if r.handlePairing(msg) {
+		return
+	}
+
+	// 2. Access Control
+	if !r.isUserAllowed(msg.FromID) {
+		r.Reply(msg, "🔐 This GoClaw instance is locked. If you are the owner, please use `/pair <your_code>` to authorize this session.")
+		return
+	}
+
+	// 3. Check for routing commands for authorized users
 	if r.handleCommands(msg) {
 		return
 	}
@@ -341,6 +352,53 @@ func (r *Router) handleCommands(msg Message) bool {
 		}
 	}
 	return false
+}
+
+func (r *Router) isUserAllowed(userID string) bool {
+	if !r.config.PairingEnabled {
+		return true
+	}
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	for _, u := range r.config.AllowedUsers {
+		if u == userID {
+			return true
+		}
+	}
+	return false
+}
+
+func (r *Router) handlePairing(msg Message) bool {
+	if !r.config.PairingEnabled {
+		return false
+	}
+
+	parts := strings.Fields(msg.Text)
+	if len(parts) < 2 || strings.ToLower(parts[0]) != "/pair" {
+		return false
+	}
+
+	code := parts[1]
+	if r.config.PairingCode != "" && code == r.config.PairingCode {
+		r.mu.Lock()
+		alreadyAllowed := false
+		for _, u := range r.config.AllowedUsers {
+			if u == msg.FromID {
+				alreadyAllowed = true
+				break
+			}
+		}
+		if !alreadyAllowed {
+			r.config.AllowedUsers = append(r.config.AllowedUsers, msg.FromID)
+			_ = config.Save(r.config) // Persist
+		}
+		r.mu.Unlock()
+		r.Reply(msg, "✅ Pairing successful! You are now authorized to use GoClaw.")
+		return true
+	}
+
+	r.Reply(msg, "❌ Invalid pairing code.")
+	return true
 }
 
 func (r *Router) Reply(msg Message, text string) error {

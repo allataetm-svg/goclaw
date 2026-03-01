@@ -161,6 +161,25 @@ func Run() {
 	}
 	conf.MaxTokens = 8000
 
+	// Step 3.5: Pairing Configuration
+	var pairingCode string
+	var pairingEnabled bool
+	_ = huh.NewForm(
+		huh.NewGroup(
+			huh.NewConfirm().
+				Title("Enable Pairing Mode? (Recommended for security)").
+				Description("Only authorized users can interact with your bot.").
+				Value(&pairingEnabled),
+			huh.NewInput().
+				Title("Set a Pairing Code (e.g. 123456):").
+				Description("Authorized users will need to run /pair <code> once.").
+				Value(&pairingCode),
+		),
+	).Run()
+
+	conf.PairingEnabled = pairingEnabled
+	conf.PairingCode = strings.TrimSpace(pairingCode)
+
 	// Step 4: Channels configuration
 	var addTelegram bool
 	err = huh.NewForm(

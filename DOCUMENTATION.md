@@ -54,10 +54,19 @@ When a user sends a message (e.g., via Telegram), the system follows this sequen
 ---
 
 ### 🚀 Usage Modes
-*   `onboard`: Run this first to set up providers and your first agent.
-*   `tui`: Chat with your default agent directly in the terminal.
-*   `gateway`: Start the background process that listens for Telegram and Console messages.
 *   `manage`: Access the dashboard to create, edit, or delete agents and channels.
+*   `gateway`: Start the background process that listens for Telegram and Console messages.
+
+---
+
+### 🛡️ Security & Pairing (OpenClaw Style)
+GoClaw includes a pairing system to prevent unauthorized access to your agents:
+1.  **Enable Pairing**: Can be enabled during `onboard` or via `manage` -> Security.
+2.  **Unauthorized Users**: If enabled, unknown users will be blocked and asked for a pairing code.
+3.  **Authorization**: Users must send `/pair <YOUR_CODE>` once.
+4.  **Whitelist**: Once successfully paired, the user's ID is added to the persistent whitelist in `config.json`.
+
+---
 
 ---
 
@@ -107,7 +116,16 @@ Bir kullanıcı mesaj gönderdiğinde (örneğin Telegram üzerinden), sistem ş
 ---
 
 ### 🚀 Çalışma Modları
-*   `onboard`: Sağlayıcıları ve ilk ajanınızı kurmak için ilk kez çalıştırın.
-*   `tui`: Terminal üzerinden varsayılan ajanınızla doğrudan sohbet edin.
-*   `gateway`: Telegram ve Konsol mesajlarını dinleyen arka plan sürecini başlatın.
 *   `manage`: Ajanları ve kanalları oluşturmak veya düzenlemek için yönetim panelini açın.
+*   `gateway`: Telegram ve Konsol mesajlarını dinleyen arka plan sürecini başlatın.
+
+---
+
+### 🛡️ Güvenlik ve Eşleştirme (Pairing)
+GoClaw, ajanlarınıza yetkisiz erişimi engellemek için bir eşleştirme sistemi içerir:
+1.  **Etkinleştirme**: `onboard` kurulumu sırasında veya `manage` -> Security menüsünden aktif edilebilir.
+2.  **Yetkisiz Kullanıcılar**: Sistem aktifse, tanınmayan kullanıcıların mesajları engellenir ve bir kod istenir.
+3.  **Yetkilendirme**: Kullanıcıların bir kez `/pair <KODUNUZ>` komutunu göndermesi gerekir.
+4.  **Beyaz Liste**: Başarıyla eşleşen kullanıcıların ID'leri `config.json` dosyasındaki beyaz listeye kalıcı olarak eklenir.
+
+---

@@ -22,10 +22,13 @@ type ChannelConfig struct {
 }
 
 type Config struct {
-	Providers    []ProviderConfig `json:"providers"`
-	Channels     []ChannelConfig  `json:"channels"`
-	DefaultAgent string           `json:"default_agent"`
-	MaxTokens    int              `json:"max_tokens,omitempty"`
+	Providers      []ProviderConfig `json:"providers"`
+	Channels       []ChannelConfig  `json:"channels"`
+	DefaultAgent   string           `json:"default_agent"`
+	MaxTokens      int              `json:"max_tokens,omitempty"`
+	PairingEnabled bool             `json:"pairing_enabled,omitempty"`
+	PairingCode    string           `json:"pairing_code,omitempty"`
+	AllowedUsers   []string         `json:"allowed_users,omitempty"` // Whitelist of FromIDs
 }
 
 func GetConfigDir() string {

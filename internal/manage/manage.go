@@ -20,6 +20,7 @@ func Run() {
 						huh.NewOption("List Agents", "list"),
 						huh.NewOption("Add New Agent (Main/Sub)", "add"),
 						huh.NewOption("Manage Channels", "channels"),
+						huh.NewOption("Security & Pairing", "security"),
 						huh.NewOption("Exit", "exit"),
 					).
 					Value(&action),
@@ -37,6 +38,8 @@ func Run() {
 			addNewAgentWizard()
 		case "channels":
 			manageChannels()
+		case "security":
+			manageSecurity()
 		}
 	}
 }
@@ -208,7 +211,7 @@ func addNewAgentWizard() {
 func manageChannels() {
 	conf, _ := config.Load()
 
-	options := make([]huh.Option[string], 0, len(conf.Channels)+1)
+	options := make([]huh.Option[string], 0, len(conf.Channels)+2)
 	for i, c := range conf.Channels {
 		options = append(options, huh.NewOption(fmt.Sprintf("%s (%s)", c.Name, c.Type), fmt.Sprintf("%d", i)))
 	}
@@ -236,4 +239,46 @@ func manageChannels() {
 			config.Save(conf)
 		}
 	}
+}
+
+func manageSecurity() {
+	conf, _ := config.Load()
+	var enabled bool = conf.PairingEnabled
+	var code string = conf.PairingCode
+
+	err := huh.NewForm(
+		huh.NewGroup(
+			huh.NewConfirm().
+				Title("Enable Pairing Mode? (Access Control)").
+				Value(&enabled),
+			huh.NewInput().
+				Title("Pairing Code:").
+				Description("Used by new users to authorize via /pair <code>").
+				Value(&code),
+		),
+	).Run()
+
+	if err != nil {
+		return
+	}
+
+	conf.PairingEnabled = enabled
+	conf.PairingCode = code
+
+	fmt.Printf("\nAuthorized Users (%d):\n", len(conf.AllowedUsers))
+	for _, u := range conf.AllowedUsers {
+		fmt.Printf("- %s\n", u)
+	}
+
+	if len(conf.AllowedUsers) > 0 {
+		var clear bool
+		_ = huh.NewForm(huh.NewGroup(huh.NewConfirm().Title("Clear All Authorized Users?").Value(&clear))).Run()
+		if clear {
+			conf.AllowedUsers = []string{}
+			fmt.Println("♻️ Whitelist cleared.")
+		}
+	}
+
+	config.Save(conf)
+	fmt.Println("✅ Security settings saved.")
 }
