@@ -143,7 +143,8 @@ func (r *Router) processMessage(ctx context.Context, msg Message) {
 	r.mu.Unlock()
 
 	// 4. Agent Loop (multi-turn tool calling)
-	var latestSent string    // Cache of the last significant text piece sent to UI
+	var latestSent string // Cache of the last significant text piece sent to UI
+	isFirstTurn := true
 	for i := 0; i < 5; i++ { // Limit to 5 iterations for safety
 		select {
 		case <-ctx.Done():
@@ -180,10 +181,15 @@ func (r *Router) processMessage(ctx context.Context, msg Message) {
 				pLower := strings.ToLower(strings.TrimSpace(prefix))
 				if strings.HasPrefix(pLower, lsLower) {
 					prefix = strings.TrimSpace(prefix[len(lsLower):])
-					prefix = strings.TrimSpace(strings.TrimPrefix(prefix, "."))
-					prefix = strings.TrimSpace(strings.TrimPrefix(prefix, ","))
-					prefix = strings.TrimSpace(strings.TrimPrefix(prefix, "!"))
+				} else {
+					// Also strip common greetings if NOT first turn
+					if !isFirstTurn {
+						prefix = stripGreetings(prefix)
+					}
 				}
+				prefix = strings.TrimSpace(strings.TrimPrefix(prefix, "."))
+				prefix = strings.TrimSpace(strings.TrimPrefix(prefix, ","))
+				prefix = strings.TrimSpace(strings.TrimPrefix(prefix, "!"))
 			}
 
 			// Send prefix if it's not a reply tool OR if it's different from the reply text
@@ -222,6 +228,7 @@ func (r *Router) processMessage(ctx context.Context, msg Message) {
 				history = append(r.histories[msg.FromID], provider.ChatMessage{Role: "user", Content: toolResp})
 				r.histories[msg.FromID] = history
 				r.mu.Unlock()
+				isFirstTurn = false
 				continue
 			}
 		}
@@ -231,14 +238,17 @@ func (r *Router) processMessage(ctx context.Context, msg Message) {
 		// If we already sent a prefix, we might want to send the suffix too, but models usually stop after a call.
 		if len(matches) == 0 {
 			toSend := resp
+			if !isFirstTurn {
+				toSend = stripGreetings(toSend)
+			}
 			trimmedLatest := strings.ToLower(strings.TrimSpace(latestSent))
-			trimmedResp := strings.ToLower(strings.TrimSpace(resp))
+			trimmedResp := strings.ToLower(strings.TrimSpace(toSend))
 
 			if trimmedLatest != "" && strings.HasPrefix(trimmedResp, trimmedLatest) {
 				// Strip the repetition from the original resp ( preserving case for the rest)
-				startIdx := strings.Index(strings.ToLower(resp), trimmedLatest)
+				startIdx := strings.Index(strings.ToLower(toSend), trimmedLatest)
 				if startIdx != -1 {
-					toSend = strings.TrimSpace(resp[startIdx+len(trimmedLatest):])
+					toSend = strings.TrimSpace(toSend[startIdx+len(trimmedLatest):])
 					toSend = strings.TrimSpace(strings.TrimPrefix(toSend, "."))
 					toSend = strings.TrimSpace(strings.TrimPrefix(toSend, "!"))
 					toSend = strings.TrimSpace(strings.TrimPrefix(toSend, "?"))
@@ -249,8 +259,31 @@ func (r *Router) processMessage(ctx context.Context, msg Message) {
 				r.Reply(msg, toSend)
 			}
 		}
-		break
+		break // Exit loop if no tool call
 	}
+}
+
+func stripGreetings(text string) string {
+	greetings := []string{
+		"selam", "merhaba", "hos geldin", "hoş geldin", "nasılsın", "nasilsin",
+		"hello", "hi", "hey", "greetings", "how can i help", "yardımcı olabilirim",
+	}
+	lower := strings.ToLower(text)
+	found := true
+	for found {
+		found = false
+		for _, g := range greetings {
+			if strings.HasPrefix(lower, g) {
+				text = strings.TrimSpace(text[len(g):])
+				// Clean punctuation
+				text = strings.TrimSpace(strings.TrimLeft(text, "!,.-?👋😊"))
+				lower = strings.ToLower(text)
+				found = true
+				break
+			}
+		}
+	}
+	return text
 }
 
 var toolCallRegex = regexp.MustCompile(`(?s)CALL:\s*(\w+)\s*\((.*?)\)`)
@@ -434,10 +467,11 @@ func (r *Router) handlePairing(msg Message) bool {
 	// LOG THE COMMAND TO CONSOLE
 	fmt.Printf("\n[SECURITY] 🔓 Pairing required for %s user: %s (Attempt %d/3)\n", chType, msg.FromID, count+1)
 	fmt.Printf("[SECURITY] Run this command to authorize:\n")
-	fmt.Printf("   goclaw pairing approve \"%s\" \"%s\" \"%s\"\n\n", chType, msg.FromID, code)
+	cmd := fmt.Sprintf("goclaw pairing approve \"%s\" \"%s\" \"%s\"", chType, msg.FromID, code)
+	fmt.Printf("   %s\n\n", cmd)
 
 	// Inform user AND SEND CODE TO TELEGRAM
-	replyText := fmt.Sprintf("🔐 This GoClaw instance is locked.\n\nYour Pairing Code: `%s`\n(Attempt %d/3)\n\nPlease provide this code to the administrator.", code, count+1)
+	replyText := fmt.Sprintf("🔐 This GoClaw instance is locked.\n\nYour Pairing Code: `%s`\n(Attempt %d/3)\n\nTo authorize, the owner should run:\n`%s`", code, count+1, cmd)
 	r.Reply(msg, replyText)
 	return true
 }
