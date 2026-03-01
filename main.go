@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"os"
 
+	"github.com/allataetm-svg/goclaw/internal/channel"
+	"github.com/allataetm-svg/goclaw/internal/config"
 	"github.com/allataetm-svg/goclaw/internal/onboard"
 	"github.com/allataetm-svg/goclaw/internal/tui"
 )
@@ -20,6 +22,8 @@ func main() {
 		onboard.Run()
 	case "tui":
 		tui.Run()
+	case "serve":
+		serve()
 	case "help":
 		printUsage()
 	default:
@@ -35,8 +39,36 @@ func printUsage() {
 Available Commands:
   onboard - Starts the setup wizard to configure providers and agents.
   tui     - Starts the Terminal User Interface (Chat).
+  serve   - Starts the multi-channel router (Console/Telegram/etc).
   help    - Shows this help message.
 
 Example Usage:
-  ./goclaw onboard`)
+  ./goclaw onboard
+  ./goclaw serve`)
+}
+
+func serve() {
+	conf, err := config.Load()
+	if err != nil {
+		fmt.Printf("Error loading config: %v\n", err)
+		return
+	}
+
+	router := channel.NewRouter(conf)
+
+	// Add a default console channel for this session
+	console := channel.NewConsoleChannel("cli", "Main Console", conf.DefaultAgent)
+	router.RegisterChannel(console)
+
+	// In a real scenario, we'd load other channels from config here
+	// for _, cc := range conf.Channels { ... }
+
+	fmt.Println("Starting GoClaw Multi-Agent Router...")
+	if err := router.Start(); err != nil {
+		fmt.Printf("Router error: %v\n", err)
+		return
+	}
+
+	// Wait forever
+	select {}
 }

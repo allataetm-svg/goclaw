@@ -1,0 +1,119 @@
+package agent
+
+import (
+	"fmt"
+	"os"
+	"os/exec"
+
+	"github.com/allataetm-svg/goclaw/internal/config"
+	"github.com/allataetm-svg/goclaw/internal/provider"
+)
+
+func init() {
+	RegisterTool(&DelegateTaskTool{})
+	RegisterTool(&ReadFileTool{})
+	RegisterTool(&WriteFileTool{})
+	RegisterTool(&ShellTool{})
+}
+
+// Tool defines the interface for agent capabilities
+type Tool interface {
+	Name() string
+	Description() string
+	Execute(args map[string]interface{}, conf config.Config) (string, error)
+}
+
+// DelegateTaskTool allows an agent to delegate a task to a subagent
+type DelegateTaskTool struct{}
+
+func (t *DelegateTaskTool) Name() string { return "delegate_task" }
+func (t *DelegateTaskTool) Description() string {
+	return "Delegates a task to a subagent. Args: { \"subagent_id\": \"string\", \"prompt\": \"string\" }"
+}
+
+func (t *DelegateTaskTool) Execute(args map[string]interface{}, conf config.Config) (string, error) {
+	subagentID, ok := args["subagent_id"].(string)
+	if !ok {
+		return "", fmt.Errorf("missing or invalid subagent_id")
+	}
+	prompt, ok := args["prompt"].(string)
+	if !ok {
+		return "", fmt.Errorf("missing or invalid prompt")
+	}
+
+	// 1. Load subagent
+	ws, prov, mod, err := LoadAgent(conf, subagentID)
+	if err != nil {
+		return "", fmt.Errorf("failed to load subagent %s: %w", subagentID, err)
+	}
+
+	// 2. Prepare subagent prompt
+	// Subagents should only know their objective, as per user's request.
+	history := []provider.ChatMessage{
+		{Role: "system", Content: BuildSystemPrompt(ws)},
+		{Role: "user", Content: prompt},
+	}
+
+	// 3. Query subagent
+	resp, err := prov.Query(mod, history)
+	if err != nil {
+		return "", fmt.Errorf("subagent query failed: %w", err)
+	}
+
+	return fmt.Sprintf("Report from subagent [%s]:\n\n%s", subagentID, resp), nil
+}
+
+// ReadFileTool reads a file from the workspace
+type ReadFileTool struct{}
+
+func (t *ReadFileTool) Name() string { return "read_file" }
+func (t *ReadFileTool) Description() string {
+	return "Reads content from a file. Args: { \"path\": \"string\" }"
+}
+func (t *ReadFileTool) Execute(args map[string]interface{}, _ config.Config) (string, error) {
+	path, _ := args["path"].(string)
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return "", err
+	}
+	return string(data), nil
+}
+
+// WriteFileTool writes a file to the workspace
+type WriteFileTool struct{}
+
+func (t *WriteFileTool) Name() string { return "write_file" }
+func (t *WriteFileTool) Description() string {
+	return "Writes content to a file. Args: { \"path\": \"string\", \"content\": \"string\" }"
+}
+func (t *WriteFileTool) Execute(args map[string]interface{}, _ config.Config) (string, error) {
+	path, _ := args["path"].(string)
+	content, _ := args["content"].(string)
+	err := os.WriteFile(path, []byte(content), 0644)
+	if err != nil {
+		return "", err
+	}
+	return "File written successfully.", nil
+}
+
+// ShellTool executes a shell command
+type ShellTool struct{}
+
+func (t *ShellTool) Name() string { return "shell" }
+func (t *ShellTool) Description() string {
+	return "Executes a shell command. Args: { \"command\": \"string\" }"
+}
+func (t *ShellTool) Execute(args map[string]interface{}, _ config.Config) (string, error) {
+	command, _ := args["command"].(string)
+	if command == "" {
+		return "", fmt.Errorf("missing command")
+	}
+
+	// For safety, we could restrict commands or set a timeout
+	cmd := exec.Command("powershell", "-Command", command)
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		return string(output), fmt.Errorf("command failed: %w", err)
+	}
+	return string(output), nil
+}

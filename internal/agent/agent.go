@@ -3,14 +3,13 @@ package agent
 import (
 	"fmt"
 	"strings"
+	"sync"
 
 	"github.com/allataetm-svg/goclaw/internal/config"
 	"github.com/allataetm-svg/goclaw/internal/provider"
 )
 
 // BuildSystemPrompt creates the full system prompt for an agent workspace.
-// For main agents it includes SOUL.md and AGENT.md content.
-// For subagents it keeps it minimal.
 func BuildSystemPrompt(ws AgentWorkspace) string {
 	var parts []string
 
@@ -24,7 +23,36 @@ func BuildSystemPrompt(ws AgentWorkspace) string {
 		parts = append(parts, ws.Agent)
 	}
 
+	// Tool descriptions
+	if len(ws.Config.Tools) > 0 {
+		parts = append(parts, "## Available Tools")
+		for _, toolName := range ws.Config.Tools {
+			if t, ok := GetTool(toolName); ok {
+				parts = append(parts, fmt.Sprintf("- **%s**: %s", t.Name(), t.Description()))
+			}
+		}
+		parts = append(parts, "To use a tool, output strictly in this format: `CALL: ToolName({\"arg1\": \"val1\"})`.")
+	}
+
 	return strings.Join(parts, "\n\n")
+}
+
+var (
+	toolRegistry = make(map[string]Tool)
+	registryMu   sync.RWMutex
+)
+
+func RegisterTool(t Tool) {
+	registryMu.Lock()
+	defer registryMu.Unlock()
+	toolRegistry[t.Name()] = t
+}
+
+func GetTool(name string) (Tool, bool) {
+	registryMu.RLock()
+	defer registryMu.RUnlock()
+	t, ok := toolRegistry[name]
+	return t, ok
 }
 
 // LoadAgent finds an agent workspace and returns its provider and model name.

@@ -13,8 +13,17 @@ type ProviderConfig struct {
 	BaseURL string `json:"base_url,omitempty"`
 }
 
+type ChannelConfig struct {
+	ID       string            `json:"id"`
+	Type     string            `json:"type"` // e.g. "telegram", "whatsapp", "cli"
+	Name     string            `json:"name"`
+	AgentID  string            `json:"agent_id,omitempty"` // Default agent for this channel
+	Settings map[string]string `json:"settings"`           // Token, URL, etc.
+}
+
 type Config struct {
 	Providers    []ProviderConfig `json:"providers"`
+	Channels     []ChannelConfig  `json:"channels"`
 	DefaultAgent string           `json:"default_agent"`
 	MaxTokens    int              `json:"max_tokens,omitempty"`
 }
