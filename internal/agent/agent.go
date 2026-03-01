@@ -16,56 +16,23 @@ func BuildSystemPrompt(ws AgentWorkspace) string {
 	parts = append(parts, fmt.Sprintf("Your name is %s.", ws.Config.Name))
 
 	if ws.Soul != "" {
-		parts = append(parts, "## Persona")
 		parts = append(parts, ws.Soul)
 	}
 
 	if ws.Agent != "" {
-		parts = append(parts, "## Primary Mission")
 		parts = append(parts, ws.Agent)
 	}
 
 	// Tool descriptions
 	if len(ws.Config.Tools) > 0 {
-		parts = append(parts, "## Capabilities & Tools")
-		parts = append(parts, "You have access to specialized tools. You MUST use them when needed to fulfill the request.")
-
+		parts = append(parts, "## Available Tools")
 		for _, toolName := range ws.Config.Tools {
 			if t, ok := GetTool(toolName); ok {
 				parts = append(parts, fmt.Sprintf("- **%s**: %s", t.Name(), t.Description()))
 			}
 		}
-
-		// Specialized instruction for delegate_task if available
-		hasDelegate := false
-		for _, t := range ws.Config.Tools {
-			if t == "delegate_task" {
-				hasDelegate = true
-				break
-			}
-		}
-
-		if hasDelegate {
-			parts = append(parts, "### Subagent Delegation")
-			parts = append(parts, "You can delegate complex tasks to other specialized agents using the `delegate_task` tool.")
-			if agents, err := ListAgents(); err == nil && len(agents) > 0 {
-				parts = append(parts, "Available subagents for delegation:")
-				for _, a := range agents {
-					if a.ID != ws.Config.ID {
-						parts = append(parts, fmt.Sprintf("- ID: `%s` | Name: %s | Model: %s", a.ID, a.Name, a.Model))
-					}
-				}
-			}
-		}
-
-		parts = append(parts, "### Tool Usage Protocol")
-		parts = append(parts, "1. To use a tool, you MUST output ONLY the call format starting with 'CALL:'.")
-		parts = append(parts, "2. DO NOT include any conversational filler, markdown code blocks (```), or pre-text.")
-		parts = append(parts, "3. Arguments MUST be a valid JSON object inside the parentheses.")
-		parts = append(parts, "4. If you need information from a tool, STOP directly after the call and wait for the response.")
-		parts = append(parts, "5. DO NOT say 'I will use the tool' or 'Here is the result'. Just output the call.")
-		parts = append(parts, "Correct Example: `CALL: ToolName({\"key\": \"value\"})`")
-		parts = append(parts, "Incorrect Example: `Here is the file: CALL: ToolName(...)`")
+		parts = append(parts, "CRITICAL: To use a tool, you MUST output ONLY the call format without any other text prefix or conversational filler.")
+		parts = append(parts, "Format: `CALL: ToolName({\"arg1\": \"val1\"})`.")
 	}
 
 	return strings.Join(parts, "\n\n")
