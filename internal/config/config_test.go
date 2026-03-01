@@ -17,10 +17,6 @@ func TestSaveAndLoadConfig(t *testing.T) {
 			{ID: "ollama", APIKey: "", BaseURL: "http://localhost:11434"},
 			{ID: "openai", APIKey: "sk-test-key", BaseURL: ""},
 		},
-		Agents: []AgentConfig{
-			{ID: "coder", Name: "Coder", SystemPrompt: "You are a coding assistant.", Model: "ollama:llama3"},
-			{ID: "helper", Name: "Helper", SystemPrompt: "You are helpful.", Model: "openai:gpt-4o"},
-		},
 		DefaultAgent: "coder",
 		MaxTokens:    4000,
 	}
@@ -48,9 +44,6 @@ func TestSaveAndLoadConfig(t *testing.T) {
 	if len(loaded.Providers) != 2 {
 		t.Errorf("Expected 2 providers, got %d", len(loaded.Providers))
 	}
-	if len(loaded.Agents) != 2 {
-		t.Errorf("Expected 2 agents, got %d", len(loaded.Agents))
-	}
 	if loaded.DefaultAgent != "coder" {
 		t.Errorf("Expected default agent 'coder', got '%s'", loaded.DefaultAgent)
 	}
@@ -74,27 +67,5 @@ func TestConfigDefaults(t *testing.T) {
 	}
 	if conf.MaxTokens != 8000 {
 		t.Errorf("Expected MaxTokens 8000 after default, got %d", conf.MaxTokens)
-	}
-}
-
-func TestAgentConfigModelFormat(t *testing.T) {
-	ag := AgentConfig{
-		ID:    "test",
-		Name:  "Test",
-		Model: "openai:gpt-4o",
-	}
-
-	data, err := json.Marshal(ag)
-	if err != nil {
-		t.Fatalf("Failed to marshal agent: %v", err)
-	}
-
-	var loaded AgentConfig
-	if err := json.Unmarshal(data, &loaded); err != nil {
-		t.Fatalf("Failed to unmarshal agent: %v", err)
-	}
-
-	if loaded.Model != "openai:gpt-4o" {
-		t.Errorf("Expected model 'openai:gpt-4o', got '%s'", loaded.Model)
 	}
 }

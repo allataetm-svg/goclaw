@@ -21,7 +21,7 @@ import (
 // Model is the main TUI application model
 type Model struct {
 	config       config.Config
-	currentAgent config.AgentConfig
+	currentAgent agent.AgentWorkspace
 	currentProv  provider.LLMProvider
 	currentMod   string
 
@@ -66,17 +66,23 @@ func waitForStreamChunk(ch chan provider.StreamChunk) tea.Cmd {
 // NewModel creates a new TUI model
 func NewModel() Model {
 	conf, err := config.Load()
-	if err != nil || len(conf.Agents) == 0 {
-		fmt.Println("⚠️ Config or agents not found. Please run 'goclaw onboard' first.")
+	if err != nil {
+		fmt.Println("Config not found. Please run 'goclaw onboard' first.")
+		os.Exit(1)
+	}
+
+	agents, err := agent.ListAgents()
+	if err != nil || len(agents) == 0 {
+		fmt.Println("No agents found. Please run 'goclaw onboard' first.")
 		os.Exit(1)
 	}
 
 	agentID := conf.DefaultAgent
 	if agentID == "" {
-		agentID = conf.Agents[0].ID
+		agentID = agents[0].ID
 	}
 
-	ag, prov, modName, err := agent.LoadAgent(conf, agentID)
+	ws, prov, modName, err := agent.LoadAgent(conf, agentID)
 	if err != nil {
 		fmt.Println("Error:", err)
 		os.Exit(1)
@@ -93,11 +99,11 @@ func NewModel() Model {
 	ta.ShowLineNumbers = false
 
 	vp := viewport.New(80, 20)
-	initMsg := fmt.Sprintf("🦞 GoClaw [%s] — Model: %s\nType /help for commands.", ag.Name, modName)
+	initMsg := fmt.Sprintf("🦞 GoClaw [%s] — Model: %s\nType /help for commands.", ws.Config.Name, modName)
 	vp.SetContent(lipgloss.NewStyle().Width(80).Render(initMsg))
 
 	history := []provider.ChatMessage{
-		{Role: "system", Content: agent.BuildSystemPrompt(ag)},
+		{Role: "system", Content: agent.BuildSystemPrompt(ws)},
 	}
 
 	renderer, _ := glamour.NewTermRenderer(
@@ -107,15 +113,15 @@ func NewModel() Model {
 
 	conv := memory.Conversation{
 		ID:        fmt.Sprintf("%d", time.Now().UnixNano()),
-		AgentID:   ag.ID,
-		AgentName: ag.Name,
+		AgentID:   ws.Config.ID,
+		AgentName: ws.Config.Name,
 		Messages:  history,
 		CreatedAt: time.Now(),
 	}
 
 	return Model{
 		config:       conf,
-		currentAgent: ag,
+		currentAgent: ws,
 		currentProv:  prov,
 		currentMod:   modName,
 		textarea:     ta,
@@ -251,7 +257,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 			// Render final markdown
 			renderedText := m.renderMarkdown(m.streamingText)
-			botPrefix := m.styles.Bot.Render(m.currentAgent.Name + ": ")
+			botPrefix := m.styles.Bot.Render(m.currentAgent.Config.Name + ": ")
 
 			// Replace streaming display with final rendered version
 			if len(m.messages) > 0 {
@@ -273,7 +279,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// Append streaming chunk
 		m.streamingText += msg.text
 
-		botPrefix := m.styles.Bot.Render(m.currentAgent.Name + ": ")
+		botPrefix := m.styles.Bot.Render(m.currentAgent.Config.Name + ": ")
 		streamDisplay := botPrefix + m.streamingText + "▊"
 
 		// Replace or add streaming message in display
@@ -299,7 +305,7 @@ func (m Model) View() string {
 	thinking := ""
 	if m.isThinking && m.streamingText == "" {
 		thinking = lipgloss.NewStyle().Foreground(lipgloss.Color("3")).Render(
-			fmt.Sprintf("\n\n%s (%s / %s) is thinking...", m.currentAgent.Name, m.currentProv.Name(), m.currentMod))
+			fmt.Sprintf("\n\n%s (%s / %s) is thinking...", m.currentAgent.Config.Name, m.currentProv.Name(), m.currentMod))
 	}
 
 	return fmt.Sprintf(

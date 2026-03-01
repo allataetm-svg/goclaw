@@ -7,13 +7,14 @@ import (
 
 	"github.com/charmbracelet/huh"
 
+	"github.com/allataetm-svg/goclaw/internal/agent"
 	"github.com/allataetm-svg/goclaw/internal/config"
 	"github.com/allataetm-svg/goclaw/internal/provider"
 )
 
 // Run starts the onboarding wizard
 func Run() {
-	fmt.Println("Welcome to the Lobster Wizard! 🦞")
+	fmt.Println("Welcome to the Lobster Wizard!")
 
 	var conf config.Config
 
@@ -54,7 +55,7 @@ func Run() {
 						Value(&baseURL),
 				),
 			).Run(); err != nil {
-				fmt.Printf("⚠️ Skipped Base URL for %s\n", id)
+				fmt.Printf("Skipped Base URL for %s\n", id)
 			}
 		}
 
@@ -67,7 +68,7 @@ func Run() {
 						Value(&apiKey),
 				),
 			).Run(); err != nil {
-				fmt.Printf("⚠️ Skipped API Key for %s\n", id)
+				fmt.Printf("Skipped API Key for %s\n", id)
 			}
 		}
 
@@ -85,7 +86,7 @@ func Run() {
 		prov := provider.MakeProvider(pc)
 		models, err := prov.FetchModels()
 		if err != nil {
-			fmt.Printf("⚠️ Error fetching models from %s: %v\n", prov.Name(), err)
+			fmt.Printf("Error fetching models from %s: %v\n", prov.Name(), err)
 			if pc.ID == "custom_openai" {
 				allModels = append(allModels, fmt.Sprintf("%s:gpt-3.5-turbo", pc.ID))
 			}
@@ -97,7 +98,7 @@ func Run() {
 	}
 
 	if len(allModels) == 0 {
-		fmt.Println("❌ No models found. Please check your settings and API keys.")
+		fmt.Println("No models found. Please check your settings and API keys.")
 		return
 	}
 	sort.Strings(allModels)
@@ -105,7 +106,7 @@ func Run() {
 	fmt.Println("\nNow let's create your default First Agent!")
 
 	var agentName string
-	var agentPrompt string
+	var agentSoul string
 	var selectedModel string
 
 	opts := make([]huh.Option[string], 0, len(allModels))
@@ -120,9 +121,9 @@ func Run() {
 				Value(&agentName),
 
 			huh.NewText().
-				Title("System Prompt (Instructions):").
+				Title("Soul Prompt (Instructions):").
 				Description("How should the agent behave?").
-				Value(&agentPrompt),
+				Value(&agentSoul),
 
 			huh.NewSelect[string]().
 				Title("LLM Model for the Agent:").
@@ -140,27 +141,30 @@ func Run() {
 	if agentName == "" {
 		agentName = "GoClaw Assistant"
 	}
-	if agentPrompt == "" {
-		agentPrompt = "You are a helpful and intelligent AI assistant."
-	}
 
-	firstAgent := config.AgentConfig{
-		ID:           strings.ToLower(strings.ReplaceAll(agentName, " ", "_")),
-		Name:         agentName,
-		SystemPrompt: agentPrompt,
-		Model:        selectedModel,
-	}
-
-	conf.Agents = append(conf.Agents, firstAgent)
-	conf.DefaultAgent = firstAgent.ID
-	conf.MaxTokens = 8000
-
-	if err := config.Save(conf); err != nil {
-		fmt.Printf("❌ Failed to save config: %v\n", err)
+	// Create the agent workspace
+	ws, err := agent.AddAgent(agentName, selectedModel, agent.AgentTypeMain)
+	if err != nil {
+		fmt.Printf("Failed to create agent: %v\n", err)
 		return
 	}
 
-	fmt.Println("\n✅ Setup complete!")
-	fmt.Printf("Agent Name: %s\nID: %s\nSelected LLM: %s\n", firstAgent.Name, firstAgent.ID, firstAgent.Model)
+	// Update soul if provided
+	if agentSoul != "" {
+		if err := agent.EditAgentSoul(ws.Config.ID, agentSoul); err != nil {
+			fmt.Printf("Warning: failed to save soul prompt: %v\n", err)
+		}
+	}
+
+	conf.DefaultAgent = ws.Config.ID
+	conf.MaxTokens = 8000
+
+	if err := config.Save(conf); err != nil {
+		fmt.Printf("Failed to save config: %v\n", err)
+		return
+	}
+
+	fmt.Println("\nSetup complete!")
+	fmt.Printf("Agent Name: %s\nID: %s\nSelected LLM: %s\n", ws.Config.Name, ws.Config.ID, ws.Config.Model)
 	fmt.Println("\nTo start chatting: goclaw tui")
 }

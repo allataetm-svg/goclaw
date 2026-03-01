@@ -13,16 +13,8 @@ type ProviderConfig struct {
 	BaseURL string `json:"base_url,omitempty"`
 }
 
-type AgentConfig struct {
-	ID           string `json:"id"`
-	Name         string `json:"name"`
-	SystemPrompt string `json:"system_prompt"`
-	Model        string `json:"model"` // Format: "providerID:modelName"
-}
-
 type Config struct {
 	Providers    []ProviderConfig `json:"providers"`
-	Agents       []AgentConfig    `json:"agents"`
 	DefaultAgent string           `json:"default_agent"`
 	MaxTokens    int              `json:"max_tokens,omitempty"`
 }

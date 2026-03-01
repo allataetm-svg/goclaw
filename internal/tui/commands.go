@@ -23,7 +23,7 @@ func (m Model) processSlashCommand(cmd string) (Model, tea.Cmd) {
   /agent switch <id>       — Switch to another agent
   /agent add <name> <prov:model> — Add new agent
   /agent delete <id>       — Delete an agent
-  /agent prompt <id> <text>— Edit agent prompt
+  /agent soul <id> <text>  — Edit agent soul prompt
   /model [provider:model]  — View or change model
   /history list            — List saved conversations
   /history load <id>       — Load a conversation
@@ -37,7 +37,7 @@ func (m Model) processSlashCommand(cmd string) (Model, tea.Cmd) {
 		tokens := memory.EstimateHistoryTokens(m.chatHistory)
 		maxTokens := m.config.MaxTokens
 		pct := float64(tokens) / float64(maxTokens) * 100
-		return m.appendSystem(fmt.Sprintf("📊 Token Usage: ~%d / %d (%.1f%%)", tokens, maxTokens, pct)), nil
+		return m.appendSystem(fmt.Sprintf("Token Usage: ~%d / %d (%.1f%%)", tokens, maxTokens, pct)), nil
 
 	case "/model":
 		if len(parts) > 1 {
@@ -56,20 +56,14 @@ func (m Model) processSlashCommand(cmd string) (Model, tea.Cmd) {
 				}
 				m.currentMod = modName
 				m.currentProv = provider.MakeProvider(pc)
-				m.currentAgent.Model = target
+				m.currentAgent.Config.Model = target
 
-				for i, a := range m.config.Agents {
-					if a.ID == m.currentAgent.ID {
-						m.config.Agents[i].Model = target
-						break
-					}
+				if err := agent.EditAgentModel(m.currentAgent.Config.ID, target); err != nil {
+					return m.appendSystem("Model changed but workspace save failed: " + err.Error()), nil
 				}
-				if err := config.Save(m.config); err != nil {
-					return m.appendSystem("⚠️ Model changed but config save failed: " + err.Error()), nil
-				}
-				return m.appendSystem(fmt.Sprintf("✅ Model changed to: %s (%s)", m.currentMod, m.currentProv.Name())), nil
+				return m.appendSystem(fmt.Sprintf("Model changed to: %s (%s)", m.currentMod, m.currentProv.Name())), nil
 			}
-			return m.appendSystem("❌ Invalid format. Example: /model openai:gpt-4o"), nil
+			return m.appendSystem("Invalid format. Example: /model openai:gpt-4o"), nil
 		}
 		return m.appendSystem(fmt.Sprintf("Current Model: %s:%s", m.currentProv.ID(), m.currentMod)), nil
 
@@ -77,7 +71,7 @@ func (m Model) processSlashCommand(cmd string) (Model, tea.Cmd) {
 		m.chatHistory = []provider.ChatMessage{
 			{Role: "system", Content: agent.BuildSystemPrompt(m.currentAgent)},
 		}
-		return m.appendSystem("✅ Memory cleared. The agent forgot your previous conversation."), nil
+		return m.appendSystem("Memory cleared. The agent forgot your previous conversation."), nil
 
 	case "/agent":
 		return m.handleAgentCommand(parts)
@@ -97,99 +91,103 @@ func (m Model) processSlashCommand(cmd string) (Model, tea.Cmd) {
 
 func (m Model) handleAgentCommand(parts []string) (Model, tea.Cmd) {
 	if len(parts) == 1 {
-		return m.appendSystem(fmt.Sprintf("Current Agent: %s (%s)", m.currentAgent.Name, m.currentAgent.ID)), nil
+		return m.appendSystem(fmt.Sprintf("Current Agent: %s (%s, type: %s)", m.currentAgent.Config.Name, m.currentAgent.Config.ID, m.currentAgent.Config.Type)), nil
 	}
 
 	subCmd := parts[1]
 
 	switch subCmd {
 	case "list":
+		agents, err := agent.ListAgents()
+		if err != nil {
+			return m.appendSystem("Error listing agents: " + err.Error()), nil
+		}
 		var list string
-		for _, a := range m.config.Agents {
+		for _, a := range agents {
 			marker := "  "
-			if a.ID == m.currentAgent.ID {
-				marker = "▸ "
+			if a.ID == m.currentAgent.Config.ID {
+				marker = "> "
 			}
-			list += fmt.Sprintf("%s%s (ID: %s, Model: %s)\n", marker, a.Name, a.ID, a.Model)
+			list += fmt.Sprintf("%s%s (ID: %s, Type: %s, Model: %s)\n", marker, a.Name, a.ID, a.Type, a.Model)
 		}
 		return m.appendSystem("Installed Agents:\n" + list), nil
 
 	case "switch":
 		if len(parts) < 3 {
-			return m.appendSystem("❌ Usage: /agent switch <id>"), nil
+			return m.appendSystem("Usage: /agent switch <id>"), nil
 		}
 		targetID := parts[2]
-		ag, prov, modName, err := agent.LoadAgent(m.config, targetID)
+		ws, prov, modName, err := agent.LoadAgent(m.config, targetID)
 		if err != nil {
-			return m.appendSystem("❌ Error: " + err.Error()), nil
+			return m.appendSystem("Error: " + err.Error()), nil
 		}
 
-		m.currentAgent = ag
+		m.currentAgent = ws
 		m.currentProv = prov
 		m.currentMod = modName
 
 		// Reset memory with new agent identity
 		m.chatHistory = []provider.ChatMessage{
-			{Role: "system", Content: agent.BuildSystemPrompt(ag)},
+			{Role: "system", Content: agent.BuildSystemPrompt(ws)},
 		}
 
-		m.config.DefaultAgent = ag.ID
+		m.config.DefaultAgent = ws.Config.ID
 		if err := config.Save(m.config); err != nil {
-			return m.appendSystem(fmt.Sprintf("⚠️ Switched to %s but config save failed: %s", ag.Name, err.Error())), nil
+			return m.appendSystem(fmt.Sprintf("Switched to %s but config save failed: %s", ws.Config.Name, err.Error())), nil
 		}
-		return m.appendSystem(fmt.Sprintf("✅ Switched to: %s (%s / %s)\nChat history has been reset.", ag.Name, prov.Name(), modName)), nil
+		return m.appendSystem(fmt.Sprintf("Switched to: %s (%s / %s)\nChat history has been reset.", ws.Config.Name, prov.Name(), modName)), nil
 
 	case "add":
 		if len(parts) < 4 {
-			return m.appendSystem("❌ Usage: /agent add <name> <provider:model>\nExample: /agent add Coder openai:gpt-4o"), nil
+			return m.appendSystem("Usage: /agent add <name> <provider:model>\nExample: /agent add Coder openai:gpt-4o"), nil
 		}
 		name := parts[2]
 		model := parts[3]
 
-		ag, err := agent.AddAgent(&m.config, name, "", model)
+		ws, err := agent.AddAgent(name, model, agent.AgentTypeMain)
 		if err != nil {
-			return m.appendSystem("❌ Error: " + err.Error()), nil
+			return m.appendSystem("Error: " + err.Error()), nil
 		}
-		return m.appendSystem(fmt.Sprintf("✅ Agent created: %s (ID: %s, Model: %s)", ag.Name, ag.ID, ag.Model)), nil
+		return m.appendSystem(fmt.Sprintf("Agent created: %s (ID: %s, Model: %s)", ws.Config.Name, ws.Config.ID, ws.Config.Model)), nil
 
 	case "delete":
 		if len(parts) < 3 {
-			return m.appendSystem("❌ Usage: /agent delete <id>"), nil
+			return m.appendSystem("Usage: /agent delete <id>"), nil
 		}
 		targetID := parts[2]
 
-		if targetID == m.currentAgent.ID {
-			return m.appendSystem("❌ Cannot delete the currently active agent. Switch first."), nil
+		if targetID == m.currentAgent.Config.ID {
+			return m.appendSystem("Cannot delete the currently active agent. Switch first."), nil
 		}
 
-		if err := agent.DeleteAgent(&m.config, targetID); err != nil {
-			return m.appendSystem("❌ Error: " + err.Error()), nil
+		if err := agent.DeleteAgent(targetID); err != nil {
+			return m.appendSystem("Error: " + err.Error()), nil
 		}
-		return m.appendSystem(fmt.Sprintf("✅ Agent '%s' deleted.", targetID)), nil
+		return m.appendSystem(fmt.Sprintf("Agent '%s' deleted.", targetID)), nil
 
-	case "prompt":
+	case "soul":
 		if len(parts) < 4 {
-			return m.appendSystem("❌ Usage: /agent prompt <id> <new prompt text>"), nil
+			return m.appendSystem("Usage: /agent soul <id> <new soul text>"), nil
 		}
 		targetID := parts[2]
-		newPrompt := strings.Join(parts[3:], " ")
+		newSoul := strings.Join(parts[3:], " ")
 
-		if err := agent.EditAgentPrompt(&m.config, targetID, newPrompt); err != nil {
-			return m.appendSystem("❌ Error: " + err.Error()), nil
+		if err := agent.EditAgentSoul(targetID, newSoul); err != nil {
+			return m.appendSystem("Error: " + err.Error()), nil
 		}
 
 		// If editing current agent, update in-memory state
-		if targetID == m.currentAgent.ID {
-			m.currentAgent.SystemPrompt = newPrompt
+		if targetID == m.currentAgent.Config.ID {
+			m.currentAgent.Soul = newSoul
 			// Update system message in history
 			if len(m.chatHistory) > 0 && m.chatHistory[0].Role == "system" {
 				m.chatHistory[0].Content = agent.BuildSystemPrompt(m.currentAgent)
 			}
 		}
-		return m.appendSystem(fmt.Sprintf("✅ Prompt updated for agent '%s'.", targetID)), nil
+		return m.appendSystem(fmt.Sprintf("Soul prompt updated for agent '%s'.", targetID)), nil
 
 	default:
-		return m.appendSystem("❌ Unknown agent command. Usage: /agent list|switch|add|delete|prompt"), nil
+		return m.appendSystem("Unknown agent command. Usage: /agent list|switch|add|delete|soul"), nil
 	}
 }
 
@@ -204,10 +202,10 @@ func (m Model) handleHistoryCommand(parts []string) (Model, tea.Cmd) {
 	case "list":
 		convs, err := memory.ListConversations()
 		if err != nil {
-			return m.appendSystem("❌ Error listing history: " + err.Error()), nil
+			return m.appendSystem("Error listing history: " + err.Error()), nil
 		}
 		if len(convs) == 0 {
-			return m.appendSystem("📭 No saved conversations found."), nil
+			return m.appendSystem("No saved conversations found."), nil
 		}
 
 		var list string
@@ -226,30 +224,30 @@ func (m Model) handleHistoryCommand(parts []string) (Model, tea.Cmd) {
 			list += fmt.Sprintf("  %s — Agent: %s, Msgs: %d, Updated: %s\n",
 				c.ID, c.AgentName, msgCount, c.UpdatedAt.Format("2006-01-02 15:04"))
 		}
-		return m.appendSystem("📚 Saved Conversations:\n" + list), nil
+		return m.appendSystem("Saved Conversations:\n" + list), nil
 
 	case "load":
 		if len(parts) < 3 {
-			return m.appendSystem("❌ Usage: /history load <id>"), nil
+			return m.appendSystem("Usage: /history load <id>"), nil
 		}
 		convID := parts[2]
 		conv, err := memory.LoadConversation(convID)
 		if err != nil {
-			return m.appendSystem("❌ Error: " + err.Error()), nil
+			return m.appendSystem("Error: " + err.Error()), nil
 		}
 
 		m.chatHistory = conv.Messages
 		m.conversation = conv
 
 		// Rebuild display messages
-		m.messages = []string{fmt.Sprintf("📂 Loaded conversation %s (Agent: %s)", conv.ID, conv.AgentName)}
+		m.messages = []string{fmt.Sprintf("Loaded conversation %s (Agent: %s)", conv.ID, conv.AgentName)}
 		for _, msg := range conv.Messages {
 			switch msg.Role {
 			case "user":
 				m.messages = append(m.messages, m.styles.Sender.Render("You: ")+msg.Content)
 			case "assistant":
 				rendered := m.renderMarkdown(msg.Content)
-				m.messages = append(m.messages, m.styles.Bot.Render(m.currentAgent.Name+": ")+"\n"+rendered)
+				m.messages = append(m.messages, m.styles.Bot.Render(m.currentAgent.Config.Name+": ")+"\n"+rendered)
 			}
 		}
 		m = m.updateViewport()
@@ -258,15 +256,15 @@ func (m Model) handleHistoryCommand(parts []string) (Model, tea.Cmd) {
 
 	case "delete":
 		if len(parts) < 3 {
-			return m.appendSystem("❌ Usage: /history delete <id>"), nil
+			return m.appendSystem("Usage: /history delete <id>"), nil
 		}
 		convID := parts[2]
 		if err := memory.DeleteConversation(convID); err != nil {
-			return m.appendSystem("❌ Error: " + err.Error()), nil
+			return m.appendSystem("Error: " + err.Error()), nil
 		}
-		return m.appendSystem(fmt.Sprintf("✅ Conversation '%s' deleted.", convID)), nil
+		return m.appendSystem(fmt.Sprintf("Conversation '%s' deleted.", convID)), nil
 
 	default:
-		return m.appendSystem("❌ Unknown history command. Usage: /history list|load|delete"), nil
+		return m.appendSystem("Unknown history command. Usage: /history list|load|delete"), nil
 	}
 }
