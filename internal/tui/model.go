@@ -12,10 +12,10 @@ import (
 	"github.com/charmbracelet/glamour"
 	"github.com/charmbracelet/lipgloss"
 
-	"github.com/openclaw-alternative/goclaw/internal/agent"
-	"github.com/openclaw-alternative/goclaw/internal/config"
-	"github.com/openclaw-alternative/goclaw/internal/memory"
-	"github.com/openclaw-alternative/goclaw/internal/provider"
+	"github.com/allataetm-svg/goclaw/internal/agent"
+	"github.com/allataetm-svg/goclaw/internal/config"
+	"github.com/allataetm-svg/goclaw/internal/memory"
+	"github.com/allataetm-svg/goclaw/internal/provider"
 )
 
 // Model is the main TUI application model

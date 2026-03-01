@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/openclaw-alternative/goclaw/internal/provider"
+	"github.com/allataetm-svg/goclaw/internal/provider"
 )
 
 func TestEstimateTokens(t *testing.T) {

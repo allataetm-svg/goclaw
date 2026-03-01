@@ -4,8 +4,8 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/openclaw-alternative/goclaw/internal/config"
-	"github.com/openclaw-alternative/goclaw/internal/provider"
+	"github.com/allataetm-svg/goclaw/internal/config"
+	"github.com/allataetm-svg/goclaw/internal/provider"
 )
 
 // BuildSystemPrompt creates the full system prompt for an agent

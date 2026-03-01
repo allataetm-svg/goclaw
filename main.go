@@ -4,8 +4,8 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/openclaw-alternative/goclaw/internal/onboard"
-	"github.com/openclaw-alternative/goclaw/internal/tui"
+	"github.com/allataetm-svg/goclaw/internal/onboard"
+	"github.com/allataetm-svg/goclaw/internal/tui"
 )
 
 func main() {

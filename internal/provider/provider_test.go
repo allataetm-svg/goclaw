@@ -4,7 +4,7 @@ import (
 	"encoding/json"
 	"testing"
 
-	"github.com/openclaw-alternative/goclaw/internal/config"
+	"github.com/allataetm-svg/goclaw/internal/config"
 )
 
 func TestMakeProvider_Ollama(t *testing.T) {

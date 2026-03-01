@@ -6,10 +6,10 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 
-	"github.com/openclaw-alternative/goclaw/internal/agent"
-	"github.com/openclaw-alternative/goclaw/internal/config"
-	"github.com/openclaw-alternative/goclaw/internal/memory"
-	"github.com/openclaw-alternative/goclaw/internal/provider"
+	"github.com/allataetm-svg/goclaw/internal/agent"
+	"github.com/allataetm-svg/goclaw/internal/config"
+	"github.com/allataetm-svg/goclaw/internal/memory"
+	"github.com/allataetm-svg/goclaw/internal/provider"
 )
 
 func (m Model) processSlashCommand(cmd string) (Model, tea.Cmd) {

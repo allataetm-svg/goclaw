@@ -1,4 +1,4 @@
-module github.com/openclaw-alternative/goclaw
+module github.com/allataetm-svg/goclaw
 
 go 1.24.2
 

@@ -1,6 +1,6 @@
 package provider
 
-import "github.com/openclaw-alternative/goclaw/internal/config"
+import "github.com/allataetm-svg/goclaw/internal/config"
 
 // MakeProvider creates the appropriate LLMProvider from a ProviderConfig
 func MakeProvider(pc config.ProviderConfig) LLMProvider {
