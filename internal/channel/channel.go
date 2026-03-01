@@ -63,7 +63,7 @@ func (r *Router) Start() error {
 
 // HandleIncoming is called by channels when a new message arrives
 func (r *Router) HandleIncoming(msg Message) {
-	// 1. Check for routing commands
+	// 1. Check for routing commands FIRST
 	if r.handleCommands(msg) {
 		return
 	}
@@ -85,19 +85,21 @@ func (r *Router) HandleIncoming(msg Message) {
 	}
 
 	// 4. Create prompt and query provider
+	// Note: SOUL.md and AGENT.md are the "System Prompt".
+	// In a stateless gateway like this, we send it every time as the system role.
 	history := []provider.ChatMessage{
 		{Role: "system", Content: agent.BuildSystemPrompt(ws)},
 		{Role: "user", Content: msg.Text},
 	}
 
-	// Create a simple response (streaming support not implemented yet in Router)
+	// 5. Query provider
 	resp, err := prov.Query(mod, history)
 	if err != nil {
 		r.Reply(msg, fmt.Sprintf("Error querying provider: %v", err))
 		return
 	}
 
-	// 5. Check for tool call
+	// 6. Check for tool call
 	if toolResp, ok := r.processToolCall(ws, resp); ok {
 		// Feed tool output back to agent for final response
 		history = append(history, provider.ChatMessage{Role: "assistant", Content: resp})

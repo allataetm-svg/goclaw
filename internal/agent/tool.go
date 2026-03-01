@@ -28,17 +28,22 @@ type DelegateTaskTool struct{}
 
 func (t *DelegateTaskTool) Name() string { return "delegate_task" }
 func (t *DelegateTaskTool) Description() string {
-	return "Delegates a task to a subagent. Args: { \"subagent_id\": \"string\", \"prompt\": \"string\" }"
+	return "Delegates a specific task to a subagent. Args: { \"subagent_id\": \"string\", \"task\": \"string\" }"
 }
 
 func (t *DelegateTaskTool) Execute(args map[string]interface{}, conf config.Config) (string, error) {
 	subagentID, ok := args["subagent_id"].(string)
 	if !ok {
-		return "", fmt.Errorf("missing or invalid subagent_id")
+		return "", fmt.Errorf("missing subagent_id")
 	}
-	prompt, ok := args["prompt"].(string)
+
+	task, ok := args["task"].(string)
 	if !ok {
-		return "", fmt.Errorf("missing or invalid prompt")
+		// Fallback to "prompt" in case LLM gets it slightly wrong
+		task, ok = args["prompt"].(string)
+		if !ok {
+			return "", fmt.Errorf("missing task description")
+		}
 	}
 
 	// 1. Load subagent
@@ -48,13 +53,12 @@ func (t *DelegateTaskTool) Execute(args map[string]interface{}, conf config.Conf
 	}
 
 	// 2. Prepare subagent prompt
-	// Subagents should only know their objective, as per user's request.
 	history := []provider.ChatMessage{
 		{Role: "system", Content: BuildSystemPrompt(ws)},
-		{Role: "user", Content: prompt},
+		{Role: "user", Content: task},
 	}
 
-	// 3. Query subagent
+	// 3. Query subagent (stateless)
 	resp, err := prov.Query(mod, history)
 	if err != nil {
 		return "", fmt.Errorf("subagent query failed: %w", err)
