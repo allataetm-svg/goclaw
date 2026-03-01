@@ -101,6 +101,7 @@ func manageSingleAgent(id string) {
 						huh.NewOption("Edit Soul (SOUL.md)", "soul"),
 						huh.NewOption("Edit Mission (AGENT.md)", "agent"),
 						huh.NewOption("Change Model", "model"),
+						huh.NewOption("Manage Tools", "tools"),
 						huh.NewOption("Delete Agent", "delete"),
 						huh.NewOption("<- Back", "back"),
 					).
@@ -157,6 +158,26 @@ func manageSingleAgent(id string) {
 			if confirm {
 				agent.DeleteAgentWorkspace(id)
 				return
+			}
+		case "tools":
+			var selectedTools []string = ws.Config.Tools
+			err := huh.NewForm(
+				huh.NewGroup(
+					huh.NewMultiSelect[string]().
+						Title("Manage Agent Tools/Permissions").
+						Options(
+							huh.NewOption("Delegate Task (delegate_task)", "delegate_task"),
+							huh.NewOption("Read File (read_file)", "read_file"),
+							huh.NewOption("Write File (write_file)", "write_file"),
+							huh.NewOption("Execute Shell (shell)", "shell"),
+						).
+						Value(&selectedTools),
+				),
+			).Run()
+			if err == nil {
+				ws.Config.Tools = selectedTools
+				agent.SaveAgentWorkspace(ws)
+				fmt.Println("✅ Tools updated successfully!")
 			}
 		}
 	}

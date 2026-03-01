@@ -162,7 +162,7 @@ func (r *Router) HandleIncoming(msg Message) {
 	r.Reply(msg, resp)
 }
 
-var toolCallRegex = regexp.MustCompile(`(?s)CALL:\s*(\w+)\((.*)\)`)
+var toolCallRegex = regexp.MustCompile(`(?s)CALL:\s*(\w+)\s*\((.*?)\)`)
 
 func (r *Router) executeTool(ws agent.AgentWorkspace, toolName, argsJSON string) (string, bool) {
 	// Verify agent has permission for this tool
