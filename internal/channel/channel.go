@@ -33,23 +33,24 @@ type Channel interface {
 	Send(toID string, text string) error
 }
 
-// Router handles incoming messages and routes them to agents
 type Router struct {
-	config      config.Config
-	channels    map[string]Channel
-	sessions    map[string]string                 // Mapping of user/chat IDs to agent IDs
-	histories   map[string][]provider.ChatMessage // In-memory history for current gateway session
-	activeTasks map[string]context.CancelFunc     // Active processing contexts per user
-	mu          sync.RWMutex
+	config        config.Config
+	channels      map[string]Channel
+	sessions      map[string]string                 // Mapping of user/chat IDs to agent IDs
+	histories     map[string][]provider.ChatMessage // In-memory history for current gateway session
+	activeTasks   map[string]context.CancelFunc     // Active processing contexts per user
+	pairingCounts map[string]int                    // Track pairing attempts (max 3)
+	mu            sync.RWMutex
 }
 
 func NewRouter(conf config.Config) *Router {
 	return &Router{
-		config:      conf,
-		channels:    make(map[string]Channel),
-		sessions:    make(map[string]string),
-		histories:   make(map[string][]provider.ChatMessage),
-		activeTasks: make(map[string]context.CancelFunc),
+		config:        conf,
+		channels:      make(map[string]Channel),
+		sessions:      make(map[string]string),
+		histories:     make(map[string][]provider.ChatMessage),
+		activeTasks:   make(map[string]context.CancelFunc),
+		pairingCounts: make(map[string]int),
 	}
 }
 
@@ -173,6 +174,18 @@ func (r *Router) processMessage(ctx context.Context, msg Message) {
 			callIdx := strings.Index(resp, "CALL:")
 			prefix := strings.TrimSpace(resp[:callIdx])
 
+			// IMPROVED: If prefix starts with latestSent (case-insensitive), strip it to avoid repetition
+			if latestSent != "" {
+				lsLower := strings.ToLower(strings.TrimSpace(latestSent))
+				pLower := strings.ToLower(strings.TrimSpace(prefix))
+				if strings.HasPrefix(pLower, lsLower) {
+					prefix = strings.TrimSpace(prefix[len(lsLower):])
+					prefix = strings.TrimSpace(strings.TrimPrefix(prefix, "."))
+					prefix = strings.TrimSpace(strings.TrimPrefix(prefix, ","))
+					prefix = strings.TrimSpace(strings.TrimPrefix(prefix, "!"))
+				}
+			}
+
 			// Send prefix if it's not a reply tool OR if it's different from the reply text
 			if prefix != "" {
 				if toolName != "reply" {
@@ -217,16 +230,19 @@ func (r *Router) processMessage(ctx context.Context, msg Message) {
 		// Usually if it's the last iteration or no tool call, we send the whole thing.
 		// If we already sent a prefix, we might want to send the suffix too, but models usually stop after a call.
 		if len(matches) == 0 {
-			// If we previously sent a reply/prefix, check if this response repeats it.
-			// Simple check: starts with OR is very similar (we'll just use starts with for now)
 			toSend := resp
-			trimmedLatest := strings.TrimSpace(latestSent)
-			if trimmedLatest != "" && strings.HasPrefix(strings.TrimSpace(resp), trimmedLatest) {
-				// Strip the repetition
-				toSend = strings.TrimSpace(strings.TrimPrefix(strings.TrimSpace(resp), trimmedLatest))
-				// Also strip leading punctuation often added after repetition
-				toSend = strings.TrimSpace(strings.TrimPrefix(toSend, "."))
-				toSend = strings.TrimSpace(strings.TrimPrefix(toSend, "!"))
+			trimmedLatest := strings.ToLower(strings.TrimSpace(latestSent))
+			trimmedResp := strings.ToLower(strings.TrimSpace(resp))
+
+			if trimmedLatest != "" && strings.HasPrefix(trimmedResp, trimmedLatest) {
+				// Strip the repetition from the original resp ( preserving case for the rest)
+				startIdx := strings.Index(strings.ToLower(resp), trimmedLatest)
+				if startIdx != -1 {
+					toSend = strings.TrimSpace(resp[startIdx+len(trimmedLatest):])
+					toSend = strings.TrimSpace(strings.TrimPrefix(toSend, "."))
+					toSend = strings.TrimSpace(strings.TrimPrefix(toSend, "!"))
+					toSend = strings.TrimSpace(strings.TrimPrefix(toSend, "?"))
+				}
 			}
 
 			if toSend != "" {
@@ -266,7 +282,6 @@ func (r *Router) executeTool(ctx context.Context, ws agent.AgentWorkspace, toolN
 	if err != nil {
 		return fmt.Sprintf("Error executing tool [%s]: %v", toolName, err), true
 	}
-
 	return result, true
 }
 
@@ -360,6 +375,14 @@ func (r *Router) isUserAllowed(userID string) bool {
 	if !r.config.PairingEnabled {
 		return true
 	}
+
+	// Dynamic check: attempt to reload config to pick up new approvals from CLI
+	if updated, err := config.Load(); err == nil {
+		r.mu.Lock()
+		r.config = updated
+		r.mu.Unlock()
+	}
+
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 	for _, u := range r.config.AllowedUsers {
@@ -371,31 +394,35 @@ func (r *Router) isUserAllowed(userID string) bool {
 }
 
 func (r *Router) handlePairing(msg Message) bool {
-	if !r.config.PairingEnabled {
+	if !r.config.PairingEnabled || r.isUserAllowed(msg.FromID) {
 		return false
 	}
 
-	// This is now purely an internal check for blocked users.
-	// Users don't use /pair anymore. We generate a code and log it.
-	if r.isUserAllowed(msg.FromID) {
-		return false
+	r.mu.Lock()
+	count := r.pairingCounts[msg.FromID]
+	if count >= 3 {
+		r.mu.Unlock()
+		r.Reply(msg, "⛔ Maximum pairing attempts reached (3/3). Please contact the administrator.")
+		return true
 	}
+	r.pairingCounts[msg.FromID]++
+	r.mu.Unlock()
 
 	// Create a 6-digit random code
 	src := rand.NewSource(time.Now().UnixNano())
 	rnd := rand.New(src)
 	code := fmt.Sprintf("%06d", rnd.Intn(1000000))
 
-	// Find the channel type (e.g. Telegram)
+	// Find the channel info
 	r.mu.RLock()
 	ch, _ := r.channels[msg.ChannelID]
 	r.mu.RUnlock()
 	chType := "Unknown"
 	if ch != nil {
-		chType = strings.Title(ch.Type()) // Capitalize Telegram, Console, etc.
+		chType = strings.Title(ch.Type())
 	}
 
-	// Save to pending (persistently so the approve command can see it)
+	// Save to pending
 	pairings, _ := config.LoadPendingPairings()
 	pairings = append(pairings, config.PendingPairing{
 		ChannelID: msg.ChannelID,
@@ -404,13 +431,14 @@ func (r *Router) handlePairing(msg Message) bool {
 	})
 	_ = config.SavePendingPairings(pairings)
 
-	// LOG THE COMMAND AS REQUESTED
-	fmt.Printf("\n[SECURITY] 🔓 Pairing required for %s user: %s\n", chType, msg.FromID)
+	// LOG THE COMMAND TO CONSOLE
+	fmt.Printf("\n[SECURITY] 🔓 Pairing required for %s user: %s (Attempt %d/3)\n", chType, msg.FromID, count+1)
 	fmt.Printf("[SECURITY] Run this command to authorize:\n")
 	fmt.Printf("   goclaw pairing approve \"%s\" \"%s\" \"%s\"\n\n", chType, msg.FromID, code)
 
-	// Inform user
-	r.Reply(msg, "🔐 This GoClaw instance is locked. Access request sent to owner.")
+	// Inform user AND SEND CODE TO TELEGRAM
+	replyText := fmt.Sprintf("🔐 This GoClaw instance is locked.\n\nYour Pairing Code: `%s`\n(Attempt %d/3)\n\nPlease provide this code to the administrator.", code, count+1)
+	r.Reply(msg, replyText)
 	return true
 }
 

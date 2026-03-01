@@ -60,6 +60,7 @@ func BuildSystemPrompt(ws AgentWorkspace) string {
 
 		parts = append(parts, "### Multi-Message & Feedback")
 		parts = append(parts, "You can send multiple messages using the `reply` tool. Use it to acknowledge long-running tasks or to talk between tool calls.")
+		parts = append(parts, "CRITICAL: DO NOT repeat information you already sent in a previous turn or a previous `reply` call. If you already said 'I will do X', do not say it again in the next part.")
 		parts = append(parts, "Example sequence: `CALL: reply({\"text\": \"Processing...\"})` -> (receives ok) -> `CALL: shell({\"command\": \"...\"})`.")
 
 		parts = append(parts, "### Tool Usage Protocol")
