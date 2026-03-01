@@ -59,10 +59,13 @@ func BuildSystemPrompt(ws AgentWorkspace) string {
 		}
 
 		parts = append(parts, "### Tool Usage Protocol")
-		parts = append(parts, "1. To use a tool, you MUST output ONLY the call format.")
-		parts = append(parts, "2. DO NOT include any conversational filler, markdown outside the call, or pre-text.")
-		parts = append(parts, "3. If you need information from a tool, STOP after the call and wait for the response.")
-		parts = append(parts, "Format: `CALL: ToolName({\"arg1\": \"val1\"})`.")
+		parts = append(parts, "1. To use a tool, you MUST output ONLY the call format starting with 'CALL:'.")
+		parts = append(parts, "2. DO NOT include any conversational filler, markdown code blocks (```), or pre-text.")
+		parts = append(parts, "3. Arguments MUST be a valid JSON object inside the parentheses.")
+		parts = append(parts, "4. If you need information from a tool, STOP directly after the call and wait for the response.")
+		parts = append(parts, "5. DO NOT say 'I will use the tool' or 'Here is the result'. Just output the call.")
+		parts = append(parts, "Correct Example: `CALL: ToolName({\"key\": \"value\"})`")
+		parts = append(parts, "Incorrect Example: `Here is the file: CALL: ToolName(...)`")
 	}
 
 	return strings.Join(parts, "\n\n")
