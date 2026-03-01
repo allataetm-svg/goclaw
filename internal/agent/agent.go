@@ -58,6 +58,10 @@ func BuildSystemPrompt(ws AgentWorkspace) string {
 			}
 		}
 
+		parts = append(parts, "### Multi-Message & Feedback")
+		parts = append(parts, "You can send multiple messages using the `reply` tool. Use it to acknowledge long-running tasks or to talk between tool calls.")
+		parts = append(parts, "Example sequence: `CALL: reply({\"text\": \"Processing...\"})` -> (receives ok) -> `CALL: shell({\"command\": \"...\"})`.")
+
 		parts = append(parts, "### Tool Usage Protocol")
 		parts = append(parts, "1. To use a tool, you MUST output ONLY the call format starting with 'CALL:'.")
 		parts = append(parts, "2. DO NOT include any conversational filler, markdown code blocks (```), or pre-text.")
@@ -139,7 +143,7 @@ func AddAgent(name, model string, agentType AgentType) (AgentWorkspace, error) {
 			Type:  agentType,
 			Name:  name,
 			Model: model,
-			Tools: []string{"delegate_task", "read_file", "write_file", "shell"},
+			Tools: []string{"delegate_task", "read_file", "write_file", "shell", "reply"},
 		},
 		Soul:  "You are a helpful and intelligent AI assistant.",
 		Agent: "",

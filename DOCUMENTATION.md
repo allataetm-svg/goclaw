@@ -41,13 +41,15 @@ When a user sends a message (e.g., via Telegram), the system follows this sequen
     *   The conversation history (memory) is retrieved.
     *   A System Prompt is injected if it's a new session or after a specific turn count to maintain context.
 6.  **AI Query**: The request is sent to the configured AI Provider (e.g., Gemini).
-7.  **Tool Call Detection**:
-    *   The Router parses the AI response for specific patterns (e.g., `CALL: tool_name({"arg": "val"})`).
 8.  **Tool Execution**:
     *   If a tool call is found and the agent has permissions, the tool (e.g., `read_file`, `shell`) is executed.
     *   The tool's output is appended to the history.
-    *   The AI is queried again with the tool result to generate a final response.
-9.  **Delivery**: The final response is sent back to the user via the original channel.
+    *   **Multi-Turn Loop**: The Router continues to query the AI with tool results (up to 5 turns) to generate intermediate replies or a final response.
+9.  **Async & Interruption**:
+    *   Processing runs asynchronously.
+    *   If a user sends a new message while the agent is still "thinking" or running a tool, the previous task is **cancelled** immediately to prioritize the new instruction.
+    *   Agents can use the `reply` tool to send multiple messages during a single turn.
+10. **Delivery**: The final response or intermediate updates are sent back to the user via the original channel.
 
 ---
 
@@ -96,13 +98,11 @@ Bir kullanıcı mesaj gönderdiğinde (örneğin Telegram üzerinden), sistem ş
     *   Sohbet geçmişi (bellek) belleğe alınır.
     *   Eğer seans yeniyse veya belirli bir mesaj sayısına ulaşıldıysa, bağlamı korumak için Sistem Komutu (System Prompt) geçmişe eklenir.
 6.  **Yapay Zeka Sorgusu**: İstek, yapılandırılmış sağlayıcıya (örn: Gemini) gönderilir.
-7.  **Araç (Tool) Çağrısı Tespiti**:
-    *   Yönlendirici, yapay zeka cevabını belirli bir kalıp (örneğin `CALL: tool_name(...)`) için tarar.
-8.  **Araç Çalıştırma**:
-    *   Bir araç çağrısı bulunursa ve ajanın yetkisi varsa, ilgili araç (örneğin `read_file`, `shell`) çalıştırılır.
-    *   Aracın çıktısı geçmişe eklenir.
-    *   Yapay zekaya, araç çıktısıyla birlikte tekrar sorgu gönderilir ve nihai cevap oluşturulur.
-9.  **Teslimat**: Nihai cevap, mesajın geldiği kanal üzerinden kullanıcıya iletilir.
+10. **Asenkron İşleme ve İptal Edilebilirlik**:
+    *   Mesaj işleme süreci arka planda (asenkron) yürütülür.
+    *   Eğer ajan işlem yaparken (düşünürken veya bir araç çalıştırırken) kullanıcı yeni bir mesaj gönderirse, devam eden işlem **iptal edilir** ve yeni talimata öncelik verilir.
+    *   Ajanlar `reply` aracını kullanarak tek bir adımda birden fazla mesaj gönderebilirler.
+11. **Teslimat**: Nihai cevap veya ara güncellemeler, orijinal kanal üzerinden kullanıcıya iletilir.
 
 ---
 

@@ -3,6 +3,7 @@ package provider
 import (
 	"bufio"
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -62,7 +63,7 @@ func (p *OpenAICompatProvider) setHeaders(req *http.Request) {
 	}
 }
 
-func (p *OpenAICompatProvider) Query(model string, messages []ChatMessage) (string, error) {
+func (p *OpenAICompatProvider) Query(ctx context.Context, model string, messages []ChatMessage) (string, error) {
 	type reqBody struct {
 		Model    string        `json:"model"`
 		Messages []ChatMessage `json:"messages"`
@@ -72,7 +73,7 @@ func (p *OpenAICompatProvider) Query(model string, messages []ChatMessage) (stri
 		return "", fmt.Errorf("failed to marshal request: %w", err)
 	}
 
-	req, err := http.NewRequest("POST", p.BaseURL+"/chat/completions", bytes.NewBuffer(data))
+	req, err := http.NewRequestWithContext(ctx, "POST", p.BaseURL+"/chat/completions", bytes.NewBuffer(data))
 	if err != nil {
 		return "", fmt.Errorf("failed to create request: %w", err)
 	}
@@ -103,7 +104,7 @@ func (p *OpenAICompatProvider) Query(model string, messages []ChatMessage) (stri
 	return "", fmt.Errorf("empty response from %s", p.ProviderName)
 }
 
-func (p *OpenAICompatProvider) QueryStream(model string, messages []ChatMessage, ch chan<- StreamChunk) {
+func (p *OpenAICompatProvider) QueryStream(ctx context.Context, model string, messages []ChatMessage, ch chan<- StreamChunk) {
 	defer close(ch)
 
 	type reqBody struct {
@@ -117,7 +118,7 @@ func (p *OpenAICompatProvider) QueryStream(model string, messages []ChatMessage,
 		return
 	}
 
-	req, err := http.NewRequest("POST", p.BaseURL+"/chat/completions", bytes.NewBuffer(data))
+	req, err := http.NewRequestWithContext(ctx, "POST", p.BaseURL+"/chat/completions", bytes.NewBuffer(data))
 	if err != nil {
 		ch <- StreamChunk{Error: fmt.Errorf("failed to create request: %w", err)}
 		return

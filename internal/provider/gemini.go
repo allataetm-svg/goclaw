@@ -3,6 +3,7 @@ package provider
 import (
 	"bufio"
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -79,7 +80,7 @@ func (p *GeminiProvider) buildContents(messages []ChatMessage) ([]geminiContent,
 	return contents, systemInstruction
 }
 
-func (p *GeminiProvider) Query(model string, messages []ChatMessage) (string, error) {
+func (p *GeminiProvider) Query(ctx context.Context, model string, messages []ChatMessage) (string, error) {
 	contents, systemInstruction := p.buildContents(messages)
 
 	type reqBody struct {
@@ -92,7 +93,7 @@ func (p *GeminiProvider) Query(model string, messages []ChatMessage) (string, er
 	}
 
 	url := fmt.Sprintf("https://generativelanguage.googleapis.com/v1beta/models/%s:generateContent?key=%s", model, p.APIKey)
-	req, err := http.NewRequest("POST", url, bytes.NewBuffer(data))
+	req, err := http.NewRequestWithContext(ctx, "POST", url, bytes.NewBuffer(data))
 	if err != nil {
 		return "", fmt.Errorf("failed to create request: %w", err)
 	}
@@ -127,7 +128,7 @@ func (p *GeminiProvider) Query(model string, messages []ChatMessage) (string, er
 	return "", fmt.Errorf("empty response from Gemini")
 }
 
-func (p *GeminiProvider) QueryStream(model string, messages []ChatMessage, ch chan<- StreamChunk) {
+func (p *GeminiProvider) QueryStream(ctx context.Context, model string, messages []ChatMessage, ch chan<- StreamChunk) {
 	defer close(ch)
 
 	contents, systemInstruction := p.buildContents(messages)
@@ -143,7 +144,7 @@ func (p *GeminiProvider) QueryStream(model string, messages []ChatMessage, ch ch
 	}
 
 	url := fmt.Sprintf("https://generativelanguage.googleapis.com/v1beta/models/%s:streamGenerateContent?alt=sse&key=%s", model, p.APIKey)
-	req, err := http.NewRequest("POST", url, bytes.NewBuffer(data))
+	req, err := http.NewRequestWithContext(ctx, "POST", url, bytes.NewBuffer(data))
 	if err != nil {
 		ch <- StreamChunk{Error: fmt.Errorf("failed to create request: %w", err)}
 		return

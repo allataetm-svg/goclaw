@@ -1,6 +1,7 @@
 package agent
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"os/exec"
@@ -15,13 +16,14 @@ func init() {
 	RegisterTool(&ReadFileTool{})
 	RegisterTool(&WriteFileTool{})
 	RegisterTool(&ShellTool{})
+	RegisterTool(&ReplyTool{})
 }
 
 // Tool defines the interface for agent capabilities
 type Tool interface {
 	Name() string
 	Description() string
-	Execute(args map[string]interface{}, conf config.Config) (string, error)
+	Execute(ctx context.Context, args map[string]interface{}, conf config.Config) (string, error)
 }
 
 // DelegateTaskTool allows an agent to delegate a task to a subagent
@@ -32,7 +34,7 @@ func (t *DelegateTaskTool) Description() string {
 	return "Delegates a specific task to a subagent. Args: { \"subagent_id\": \"string\", \"task\": \"string\" }"
 }
 
-func (t *DelegateTaskTool) Execute(args map[string]interface{}, conf config.Config) (string, error) {
+func (t *DelegateTaskTool) Execute(ctx context.Context, args map[string]interface{}, conf config.Config) (string, error) {
 	subagentID, ok := args["subagent_id"].(string)
 	if !ok {
 		return "", fmt.Errorf("missing subagent_id")
@@ -60,7 +62,7 @@ func (t *DelegateTaskTool) Execute(args map[string]interface{}, conf config.Conf
 	}
 
 	// 3. Query subagent (stateless)
-	resp, err := prov.Query(mod, history)
+	resp, err := prov.Query(ctx, mod, history)
 	if err != nil {
 		return "", fmt.Errorf("subagent query failed: %w", err)
 	}
@@ -75,7 +77,7 @@ func (t *ReadFileTool) Name() string { return "read_file" }
 func (t *ReadFileTool) Description() string {
 	return "Reads content from a file. Args: { \"path\": \"string\" }"
 }
-func (t *ReadFileTool) Execute(args map[string]interface{}, _ config.Config) (string, error) {
+func (t *ReadFileTool) Execute(ctx context.Context, args map[string]interface{}, _ config.Config) (string, error) {
 	path, _ := args["path"].(string)
 	data, err := os.ReadFile(path)
 	if err != nil {
@@ -91,7 +93,7 @@ func (t *WriteFileTool) Name() string { return "write_file" }
 func (t *WriteFileTool) Description() string {
 	return "Writes content to a file. Args: { \"path\": \"string\", \"content\": \"string\" }"
 }
-func (t *WriteFileTool) Execute(args map[string]interface{}, _ config.Config) (string, error) {
+func (t *WriteFileTool) Execute(ctx context.Context, args map[string]interface{}, _ config.Config) (string, error) {
 	path, _ := args["path"].(string)
 	content, _ := args["content"].(string)
 	err := os.WriteFile(path, []byte(content), 0644)
@@ -108,7 +110,7 @@ func (t *ShellTool) Name() string { return "shell" }
 func (t *ShellTool) Description() string {
 	return "Executes a shell command. Args: { \"command\": \"string\" }"
 }
-func (t *ShellTool) Execute(args map[string]interface{}, _ config.Config) (string, error) {
+func (t *ShellTool) Execute(ctx context.Context, args map[string]interface{}, _ config.Config) (string, error) {
 	command, _ := args["command"].(string)
 	if command == "" {
 		return "", fmt.Errorf("missing command")
@@ -116,9 +118,9 @@ func (t *ShellTool) Execute(args map[string]interface{}, _ config.Config) (strin
 
 	var cmd *exec.Cmd
 	if runtime.GOOS == "windows" {
-		cmd = exec.Command("powershell", "-Command", command)
+		cmd = exec.CommandContext(ctx, "powershell", "-Command", command)
 	} else {
-		cmd = exec.Command("sh", "-c", command)
+		cmd = exec.CommandContext(ctx, "sh", "-c", command)
 	}
 
 	output, err := cmd.CombinedOutput()
@@ -126,4 +128,20 @@ func (t *ShellTool) Execute(args map[string]interface{}, _ config.Config) (strin
 		return string(output), fmt.Errorf("command failed: %w", err)
 	}
 	return string(output), nil
+}
+
+// ReplyTool allows an agent to send a message and continue processing
+type ReplyTool struct{}
+
+func (t *ReplyTool) Name() string { return "reply" }
+func (t *ReplyTool) Description() string {
+	return "Sends an immediate reply to the user. Use this to acknowledge requests or provide updates before continuing. Args: { \"text\": \"string\" }"
+}
+func (t *ReplyTool) Execute(ctx context.Context, args map[string]interface{}, _ config.Config) (string, error) {
+	text, _ := args["text"].(string)
+	if text == "" {
+		return "Reply content is empty.", nil
+	}
+	// The actual sending is handled in channel.go's processMessage loop if it sees a tool call.
+	return fmt.Sprintf("User received: %s", text), nil
 }

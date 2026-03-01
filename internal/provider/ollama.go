@@ -3,6 +3,7 @@ package provider
 import (
 	"bufio"
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -38,7 +39,7 @@ func (p *OllamaProvider) FetchModels() ([]string, error) {
 	return models, nil
 }
 
-func (p *OllamaProvider) Query(model string, messages []ChatMessage) (string, error) {
+func (p *OllamaProvider) Query(ctx context.Context, model string, messages []ChatMessage) (string, error) {
 	type reqBody struct {
 		Model    string        `json:"model"`
 		Messages []ChatMessage `json:"messages"`
@@ -49,7 +50,13 @@ func (p *OllamaProvider) Query(model string, messages []ChatMessage) (string, er
 		return "", fmt.Errorf("failed to marshal request: %w", err)
 	}
 
-	resp, err := http.Post(p.URL+"/api/chat", "application/json", bytes.NewBuffer(data))
+	req, err := http.NewRequestWithContext(ctx, "POST", p.URL+"/api/chat", bytes.NewBuffer(data))
+	if err != nil {
+		return "", fmt.Errorf("failed to create Ollama request: %w", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
 		return "", fmt.Errorf("Ollama request failed: %w", err)
 	}
@@ -68,7 +75,7 @@ func (p *OllamaProvider) Query(model string, messages []ChatMessage) (string, er
 	return strings.TrimSpace(chatResp.Message.Content), nil
 }
 
-func (p *OllamaProvider) QueryStream(model string, messages []ChatMessage, ch chan<- StreamChunk) {
+func (p *OllamaProvider) QueryStream(ctx context.Context, model string, messages []ChatMessage, ch chan<- StreamChunk) {
 	defer close(ch)
 
 	type reqBody struct {
@@ -82,7 +89,14 @@ func (p *OllamaProvider) QueryStream(model string, messages []ChatMessage, ch ch
 		return
 	}
 
-	resp, err := http.Post(p.URL+"/api/chat", "application/json", bytes.NewBuffer(data))
+	req, err := http.NewRequestWithContext(ctx, "POST", p.URL+"/api/chat", bytes.NewBuffer(data))
+	if err != nil {
+		ch <- StreamChunk{Error: fmt.Errorf("failed to create Ollama request: %w", err)}
+		return
+	}
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
 		ch <- StreamChunk{Error: fmt.Errorf("Ollama request failed: %w", err)}
 		return

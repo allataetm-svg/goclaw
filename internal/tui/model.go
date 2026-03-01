@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"strings"
@@ -222,12 +223,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			currentHistory := make([]provider.ChatMessage, len(m.chatHistory))
 			copy(currentHistory, m.chatHistory)
 
-			prov := m.currentProv
-			mod := m.currentMod
-
 			return m, func() tea.Msg {
 				ch := make(chan provider.StreamChunk, 100)
-				go prov.QueryStream(mod, currentHistory, ch)
+				go m.currentProv.QueryStream(context.Background(), m.currentMod, currentHistory, ch)
 				return streamStartMsg{ch: ch}
 			}
 		}

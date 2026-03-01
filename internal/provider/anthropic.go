@@ -3,6 +3,7 @@ package provider
 import (
 	"bufio"
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -25,7 +26,7 @@ func (p *AnthropicProvider) FetchModels() ([]string, error) {
 	}, nil
 }
 
-func (p *AnthropicProvider) buildRequest(model string, messages []ChatMessage, stream bool) (*http.Request, error) {
+func (p *AnthropicProvider) buildRequest(ctx context.Context, model string, messages []ChatMessage, stream bool) (*http.Request, error) {
 	var systemPrompt string
 	var anthropicMessages []ChatMessage
 
@@ -56,7 +57,7 @@ func (p *AnthropicProvider) buildRequest(model string, messages []ChatMessage, s
 		return nil, fmt.Errorf("failed to marshal request: %w", err)
 	}
 
-	req, err := http.NewRequest("POST", "https://api.anthropic.com/v1/messages", bytes.NewBuffer(data))
+	req, err := http.NewRequestWithContext(ctx, "POST", "https://api.anthropic.com/v1/messages", bytes.NewBuffer(data))
 	if err != nil {
 		return nil, fmt.Errorf("failed to create request: %w", err)
 	}
@@ -66,8 +67,8 @@ func (p *AnthropicProvider) buildRequest(model string, messages []ChatMessage, s
 	return req, nil
 }
 
-func (p *AnthropicProvider) Query(model string, messages []ChatMessage) (string, error) {
-	req, err := p.buildRequest(model, messages, false)
+func (p *AnthropicProvider) Query(ctx context.Context, model string, messages []ChatMessage) (string, error) {
+	req, err := p.buildRequest(ctx, model, messages, false)
 	if err != nil {
 		return "", err
 	}
@@ -97,10 +98,10 @@ func (p *AnthropicProvider) Query(model string, messages []ChatMessage) (string,
 	return "", fmt.Errorf("empty response from Anthropic")
 }
 
-func (p *AnthropicProvider) QueryStream(model string, messages []ChatMessage, ch chan<- StreamChunk) {
+func (p *AnthropicProvider) QueryStream(ctx context.Context, model string, messages []ChatMessage, ch chan<- StreamChunk) {
 	defer close(ch)
 
-	req, err := p.buildRequest(model, messages, true)
+	req, err := p.buildRequest(ctx, model, messages, true)
 	if err != nil {
 		ch <- StreamChunk{Error: err}
 		return

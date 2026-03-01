@@ -1,6 +1,7 @@
 package channel
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"regexp"
@@ -32,19 +33,21 @@ type Channel interface {
 
 // Router handles incoming messages and routes them to agents
 type Router struct {
-	config    config.Config
-	channels  map[string]Channel
-	sessions  map[string]string                 // Mapping of user/chat IDs to agent IDs
-	histories map[string][]provider.ChatMessage // In-memory history for current gateway session
-	mu        sync.RWMutex
+	config      config.Config
+	channels    map[string]Channel
+	sessions    map[string]string                 // Mapping of user/chat IDs to agent IDs
+	histories   map[string][]provider.ChatMessage // In-memory history for current gateway session
+	activeTasks map[string]context.CancelFunc     // Active processing contexts per user
+	mu          sync.RWMutex
 }
 
 func NewRouter(conf config.Config) *Router {
 	return &Router{
-		config:    conf,
-		channels:  make(map[string]Channel),
-		sessions:  make(map[string]string),
-		histories: make(map[string][]provider.ChatMessage),
+		config:      conf,
+		channels:    make(map[string]Channel),
+		sessions:    make(map[string]string),
+		histories:   make(map[string][]provider.ChatMessage),
+		activeTasks: make(map[string]context.CancelFunc),
 	}
 }
 
@@ -70,7 +73,26 @@ func (r *Router) HandleIncoming(msg Message) {
 		return
 	}
 
-	// 2. Identify target agent
+	// 2. Interrupt existing task if any
+	r.mu.Lock()
+	if cancel, exists := r.activeTasks[msg.FromID]; exists {
+		cancel()
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	r.activeTasks[msg.FromID] = cancel
+	r.mu.Unlock()
+
+	go r.processMessage(ctx, msg)
+}
+
+func (r *Router) processMessage(ctx context.Context, msg Message) {
+	defer func() {
+		r.mu.Lock()
+		delete(r.activeTasks, msg.FromID)
+		r.mu.Unlock()
+	}()
+
+	// 1. Identify target agent
 	r.mu.RLock()
 	agentID, exists := r.sessions[msg.FromID]
 	r.mu.RUnlock()
@@ -79,27 +101,23 @@ func (r *Router) HandleIncoming(msg Message) {
 		agentID = r.config.DefaultAgent
 	}
 
-	// 3. Load agent workspace
+	// 2. Load agent workspace
 	ws, prov, mod, err := agent.LoadAgent(r.config, agentID)
 	if err != nil {
 		r.Reply(msg, fmt.Sprintf("Error loading agent %s: %v", agentID, err))
 		return
 	}
 
-	// 4. Update and prepare history
+	// 3. Update and prepare history
 	r.mu.Lock()
 	history := r.histories[msg.FromID]
 
-	// Determine if we should include system prompt
-	// Rule: First message (len 0) OR every 20 messages (each turn is 2 messages)
-	// We count non-system messages to decide.
 	chatCount := 0
 	for _, h := range history {
 		if h.Role != "system" {
 			chatCount++
 		}
 	}
-	// Every 20 turns (40 messages) or first message
 	if len(history) == 0 || (chatCount > 0 && chatCount%40 == 0) {
 		history = append(history, provider.ChatMessage{
 			Role:    "system",
@@ -110,61 +128,77 @@ func (r *Router) HandleIncoming(msg Message) {
 	r.histories[msg.FromID] = history
 	r.mu.Unlock()
 
-	// 5. Query provider
-	resp, err := prov.Query(mod, history)
-	if err != nil {
-		r.Reply(msg, fmt.Sprintf("Error querying provider: %v", err))
-		return
-	}
+	// 4. Agent Loop (multi-turn tool calling)
+	for i := 0; i < 5; i++ { // Limit to 5 iterations for safety
+		select {
+		case <-ctx.Done():
+			return
+		default:
+		}
 
-	// 6. Check for tool call
-	// Use regex to find ANY tool call in the response, even if the model is talkative
-	matches := toolCallRegex.FindAllStringSubmatch(resp, -1)
-	if len(matches) > 0 {
-		// Just process the first one for now
-		match := matches[0]
-		toolName := match[1]
-		argsJSON := match[2]
-
-		if toolResp, ok := r.executeTool(ws, toolName, argsJSON); ok {
-			// Feed tool output back to agent for final response
-			r.mu.Lock()
-			history = r.histories[msg.FromID]
-			history = append(history, provider.ChatMessage{Role: "assistant", Content: resp})
-			history = append(history, provider.ChatMessage{Role: "user", Content: toolResp})
-			r.histories[msg.FromID] = history
-			r.mu.Unlock()
-
-			finalResp, err := prov.Query(mod, history)
-			if err != nil {
-				r.Reply(msg, fmt.Sprintf("Error in post-tool query: %v", err))
-				return
-			}
-
-			r.mu.Lock()
-			history = r.histories[msg.FromID]
-			history = append(history, provider.ChatMessage{Role: "assistant", Content: finalResp})
-			r.histories[msg.FromID] = history
-			r.mu.Unlock()
-
-			r.Reply(msg, finalResp)
+		resp, err := prov.Query(ctx, mod, history)
+		if err != nil {
+			r.Reply(msg, fmt.Sprintf("Error: %v", err))
 			return
 		}
+
+		// Update history with assistant message
+		r.mu.Lock()
+		history = append(r.histories[msg.FromID], provider.ChatMessage{Role: "assistant", Content: resp})
+		r.histories[msg.FromID] = history
+		r.mu.Unlock()
+
+		// Check for tool call
+		matches := toolCallRegex.FindAllStringSubmatch(resp, -1)
+		if len(matches) > 0 {
+			// If there's conversational text before the call, send it!
+			callIdx := strings.Index(resp, "CALL:")
+			if callIdx > 0 {
+				prefix := strings.TrimSpace(resp[:callIdx])
+				if prefix != "" {
+					r.Reply(msg, prefix)
+				}
+			}
+
+			// Execute tool
+			match := matches[0]
+			toolName := match[1]
+			argsJSON := match[2]
+
+			// Explicitly handle 'reply' tool to send messages during the loop
+			if toolName == "reply" {
+				var args map[string]interface{}
+				if err := json.Unmarshal([]byte(argsJSON), &args); err == nil {
+					if txt, ok := args["text"].(string); ok && txt != "" {
+						r.Reply(msg, txt)
+					}
+				}
+			}
+
+			toolResp, ok := r.executeTool(ctx, ws, toolName, argsJSON)
+			if ok {
+				// Feed tool output back and continue loop
+				r.mu.Lock()
+				history = append(r.histories[msg.FromID], provider.ChatMessage{Role: "user", Content: toolResp})
+				r.histories[msg.FromID] = history
+				r.mu.Unlock()
+				continue
+			}
+		}
+
+		// No more tools, just reply with the response (or the remaining part after tool call)
+		// Usually if it's the last iteration or no tool call, we send the whole thing.
+		// If we already sent a prefix, we might want to send the suffix too, but models usually stop after a call.
+		if len(matches) == 0 {
+			r.Reply(msg, resp)
+		}
+		break
 	}
-
-	r.mu.Lock()
-	r.histories[msg.FromID] = append(r.histories[msg.FromID], provider.ChatMessage{
-		Role:    "assistant",
-		Content: resp,
-	})
-	r.mu.Unlock()
-
-	r.Reply(msg, resp)
 }
 
 var toolCallRegex = regexp.MustCompile(`(?s)CALL:\s*(\w+)\s*\((.*?)\)`)
 
-func (r *Router) executeTool(ws agent.AgentWorkspace, toolName, argsJSON string) (string, bool) {
+func (r *Router) executeTool(ctx context.Context, ws agent.AgentWorkspace, toolName, argsJSON string) (string, bool) {
 	// Verify agent has permission for this tool
 	hasPermission := false
 	for _, t := range ws.Config.Tools {
@@ -187,7 +221,7 @@ func (r *Router) executeTool(ws agent.AgentWorkspace, toolName, argsJSON string)
 		return fmt.Sprintf("Error parsing tool arguments: %v", err), true
 	}
 
-	result, err := t.Execute(args, r.config)
+	result, err := t.Execute(ctx, args, r.config)
 	if err != nil {
 		return fmt.Sprintf("Error executing tool [%s]: %v", toolName, err), true
 	}
@@ -212,8 +246,41 @@ func (r *Router) handleCommands(msg Message) bool {
 		helpText := "🦞 GoClaw Gateway Commands:\n"
 		helpText += "- /agent list: Show all installed agents\n"
 		helpText += "- /agent switch <id>: Switch to a different agent\n"
+		helpText += "- /clear: Reset current chat history\n"
+		helpText += "- /history: Show current chat history entries\n"
+		helpText += "- /tokens: (TODO) Show token estimation\n"
 		helpText += "- /help: Show this message\n"
 		r.Reply(msg, helpText)
+		return true
+	case "/clear":
+		r.mu.Lock()
+		delete(r.histories, msg.FromID)
+		r.mu.Unlock()
+		r.Reply(msg, "✅ Chat history cleared.")
+		return true
+	case "/history":
+		r.mu.RLock()
+		h := r.histories[msg.FromID]
+		r.mu.RUnlock()
+		if len(h) == 0 {
+			r.Reply(msg, "History is empty.")
+			return true
+		}
+		text := fmt.Sprintf("History (%d messages):\n", len(h))
+		for i, m := range h {
+			text += fmt.Sprintf("%d. [%s]: %s\n", i+1, m.Role, strings.Split(m.Content, "\n")[0])
+		}
+		r.Reply(msg, text)
+		return true
+	case "/tokens":
+		r.mu.RLock()
+		h := r.histories[msg.FromID]
+		r.mu.RUnlock()
+		chars := 0
+		for _, m := range h {
+			chars += len(m.Content)
+		}
+		r.Reply(msg, fmt.Sprintf("Estimated tokens: ~%d (based on character count/4)", chars/4))
 		return true
 	case "/agent":
 		if len(parts) < 2 {
