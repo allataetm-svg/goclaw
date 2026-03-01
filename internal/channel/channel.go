@@ -32,17 +32,19 @@ type Channel interface {
 
 // Router handles incoming messages and routes them to agents
 type Router struct {
-	config   config.Config
-	channels map[string]Channel
-	sessions map[string]string // Mapping of user/chat IDs to agent IDs
-	mu       sync.RWMutex
+	config    config.Config
+	channels  map[string]Channel
+	sessions  map[string]string                 // Mapping of user/chat IDs to agent IDs
+	histories map[string][]provider.ChatMessage // In-memory history for current gateway session
+	mu        sync.RWMutex
 }
 
 func NewRouter(conf config.Config) *Router {
 	return &Router{
-		config:   conf,
-		channels: make(map[string]Channel),
-		sessions: make(map[string]string),
+		config:    conf,
+		channels:  make(map[string]Channel),
+		sessions:  make(map[string]string),
+		histories: make(map[string][]provider.ChatMessage),
 	}
 }
 
@@ -84,13 +86,29 @@ func (r *Router) HandleIncoming(msg Message) {
 		return
 	}
 
-	// 4. Create prompt and query provider
-	// Note: SOUL.md and AGENT.md are the "System Prompt".
-	// In a stateless gateway like this, we send it every time as the system role.
-	history := []provider.ChatMessage{
-		{Role: "system", Content: agent.BuildSystemPrompt(ws)},
-		{Role: "user", Content: msg.Text},
+	// 4. Update and prepare history
+	r.mu.Lock()
+	history := r.histories[msg.FromID]
+
+	// Determine if we should include system prompt
+	// Rule: First message (len 0) OR every 20 messages (each turn is 2 messages)
+	// We count non-system messages to decide.
+	chatCount := 0
+	for _, h := range history {
+		if h.Role != "system" {
+			chatCount++
+		}
 	}
+	// Every 20 turns (40 messages) or first message
+	if len(history) == 0 || (chatCount > 0 && chatCount%40 == 0) {
+		history = append(history, provider.ChatMessage{
+			Role:    "system",
+			Content: agent.BuildSystemPrompt(ws),
+		})
+	}
+	history = append(history, provider.ChatMessage{Role: "user", Content: msg.Text})
+	r.histories[msg.FromID] = history
+	r.mu.Unlock()
 
 	// 5. Query provider
 	resp, err := prov.Query(mod, history)
@@ -102,17 +120,35 @@ func (r *Router) HandleIncoming(msg Message) {
 	// 6. Check for tool call
 	if toolResp, ok := r.processToolCall(ws, resp); ok {
 		// Feed tool output back to agent for final response
+		r.mu.Lock()
+		history = r.histories[msg.FromID]
 		history = append(history, provider.ChatMessage{Role: "assistant", Content: resp})
 		history = append(history, provider.ChatMessage{Role: "user", Content: toolResp})
+		r.histories[msg.FromID] = history
+		r.mu.Unlock()
 
 		finalResp, err := prov.Query(mod, history)
 		if err != nil {
 			r.Reply(msg, fmt.Sprintf("Error in post-tool query: %v", err))
 			return
 		}
+
+		r.mu.Lock()
+		history = r.histories[msg.FromID]
+		history = append(history, provider.ChatMessage{Role: "assistant", Content: finalResp})
+		r.histories[msg.FromID] = history
+		r.mu.Unlock()
+
 		r.Reply(msg, finalResp)
 		return
 	}
+
+	r.mu.Lock()
+	r.histories[msg.FromID] = append(r.histories[msg.FromID], provider.ChatMessage{
+		Role:    "assistant",
+		Content: resp,
+	})
+	r.mu.Unlock()
 
 	r.Reply(msg, resp)
 }
@@ -220,4 +256,6 @@ func (r *Router) SetSession(userID, agentID string) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	r.sessions[userID] = agentID
+	// Clear history when switching agent to maintain context integrity
+	delete(r.histories, userID)
 }
