@@ -16,22 +16,52 @@ func BuildSystemPrompt(ws AgentWorkspace) string {
 	parts = append(parts, fmt.Sprintf("Your name is %s.", ws.Config.Name))
 
 	if ws.Soul != "" {
+		parts = append(parts, "## Persona")
 		parts = append(parts, ws.Soul)
 	}
 
 	if ws.Agent != "" {
+		parts = append(parts, "## Primary Mission")
 		parts = append(parts, ws.Agent)
 	}
 
 	// Tool descriptions
 	if len(ws.Config.Tools) > 0 {
-		parts = append(parts, "## Available Tools")
+		parts = append(parts, "## Capabilities & Tools")
+		parts = append(parts, "You have access to specialized tools. You MUST use them when needed to fulfill the request.")
+
 		for _, toolName := range ws.Config.Tools {
 			if t, ok := GetTool(toolName); ok {
 				parts = append(parts, fmt.Sprintf("- **%s**: %s", t.Name(), t.Description()))
 			}
 		}
-		parts = append(parts, "CRITICAL: To use a tool, you MUST output ONLY the call format without any other text prefix or conversational filler.")
+
+		// Specialized instruction for delegate_task if available
+		hasDelegate := false
+		for _, t := range ws.Config.Tools {
+			if t == "delegate_task" {
+				hasDelegate = true
+				break
+			}
+		}
+
+		if hasDelegate {
+			parts = append(parts, "### Subagent Delegation")
+			parts = append(parts, "You can delegate complex tasks to other specialized agents using the `delegate_task` tool.")
+			if agents, err := ListAgents(); err == nil && len(agents) > 0 {
+				parts = append(parts, "Available subagents for delegation:")
+				for _, a := range agents {
+					if a.ID != ws.Config.ID {
+						parts = append(parts, fmt.Sprintf("- ID: `%s` | Name: %s | Model: %s", a.ID, a.Name, a.Model))
+					}
+				}
+			}
+		}
+
+		parts = append(parts, "### Tool Usage Protocol")
+		parts = append(parts, "1. To use a tool, you MUST output ONLY the call format.")
+		parts = append(parts, "2. DO NOT include any conversational filler, markdown outside the call, or pre-text.")
+		parts = append(parts, "3. If you need information from a tool, STOP after the call and wait for the response.")
 		parts = append(parts, "Format: `CALL: ToolName({\"arg1\": \"val1\"})`.")
 	}
 
