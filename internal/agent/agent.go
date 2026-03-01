@@ -31,7 +31,8 @@ func BuildSystemPrompt(ws AgentWorkspace) string {
 				parts = append(parts, fmt.Sprintf("- **%s**: %s", t.Name(), t.Description()))
 			}
 		}
-		parts = append(parts, "To use a tool, output strictly in this format: `CALL: ToolName({\"arg1\": \"val1\"})`.")
+		parts = append(parts, "CRITICAL: To use a tool, you MUST output ONLY the call format without any other text prefix or conversational filler.")
+		parts = append(parts, "Format: `CALL: ToolName({\"arg1\": \"val1\"})`.")
 	}
 
 	return strings.Join(parts, "\n\n")

@@ -118,29 +118,38 @@ func (r *Router) HandleIncoming(msg Message) {
 	}
 
 	// 6. Check for tool call
-	if toolResp, ok := r.processToolCall(ws, resp); ok {
-		// Feed tool output back to agent for final response
-		r.mu.Lock()
-		history = r.histories[msg.FromID]
-		history = append(history, provider.ChatMessage{Role: "assistant", Content: resp})
-		history = append(history, provider.ChatMessage{Role: "user", Content: toolResp})
-		r.histories[msg.FromID] = history
-		r.mu.Unlock()
+	// Use regex to find ANY tool call in the response, even if the model is talkative
+	matches := toolCallRegex.FindAllStringSubmatch(resp, -1)
+	if len(matches) > 0 {
+		// Just process the first one for now
+		match := matches[0]
+		toolName := match[1]
+		argsJSON := match[2]
 
-		finalResp, err := prov.Query(mod, history)
-		if err != nil {
-			r.Reply(msg, fmt.Sprintf("Error in post-tool query: %v", err))
+		if toolResp, ok := r.executeTool(ws, toolName, argsJSON); ok {
+			// Feed tool output back to agent for final response
+			r.mu.Lock()
+			history = r.histories[msg.FromID]
+			history = append(history, provider.ChatMessage{Role: "assistant", Content: resp})
+			history = append(history, provider.ChatMessage{Role: "user", Content: toolResp})
+			r.histories[msg.FromID] = history
+			r.mu.Unlock()
+
+			finalResp, err := prov.Query(mod, history)
+			if err != nil {
+				r.Reply(msg, fmt.Sprintf("Error in post-tool query: %v", err))
+				return
+			}
+
+			r.mu.Lock()
+			history = r.histories[msg.FromID]
+			history = append(history, provider.ChatMessage{Role: "assistant", Content: finalResp})
+			r.histories[msg.FromID] = history
+			r.mu.Unlock()
+
+			r.Reply(msg, finalResp)
 			return
 		}
-
-		r.mu.Lock()
-		history = r.histories[msg.FromID]
-		history = append(history, provider.ChatMessage{Role: "assistant", Content: finalResp})
-		r.histories[msg.FromID] = history
-		r.mu.Unlock()
-
-		r.Reply(msg, finalResp)
-		return
 	}
 
 	r.mu.Lock()
@@ -155,15 +164,7 @@ func (r *Router) HandleIncoming(msg Message) {
 
 var toolCallRegex = regexp.MustCompile(`(?s)CALL:\s*(\w+)\((.*)\)`)
 
-func (r *Router) processToolCall(ws agent.AgentWorkspace, text string) (string, bool) {
-	match := toolCallRegex.FindStringSubmatch(text)
-	if len(match) != 3 {
-		return "", false
-	}
-
-	toolName := match[1]
-	argsJSON := match[2]
-
+func (r *Router) executeTool(ws agent.AgentWorkspace, toolName, argsJSON string) (string, bool) {
 	// Verify agent has permission for this tool
 	hasPermission := false
 	for _, t := range ws.Config.Tools {
@@ -207,6 +208,13 @@ func (r *Router) handleCommands(msg Message) bool {
 	}
 
 	switch command {
+	case "/help":
+		helpText := "🦞 GoClaw Gateway Commands:\n"
+		helpText += "- /agent list: Show all installed agents\n"
+		helpText += "- /agent switch <id>: Switch to a different agent\n"
+		helpText += "- /help: Show this message\n"
+		r.Reply(msg, helpText)
+		return true
 	case "/agent":
 		if len(parts) < 2 {
 			r.Reply(msg, "Usage: /agent list|switch <id>")
