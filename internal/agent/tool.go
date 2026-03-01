@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"runtime"
 
 	"github.com/allataetm-svg/goclaw/internal/config"
 	"github.com/allataetm-svg/goclaw/internal/provider"
@@ -113,8 +114,13 @@ func (t *ShellTool) Execute(args map[string]interface{}, _ config.Config) (strin
 		return "", fmt.Errorf("missing command")
 	}
 
-	// For safety, we could restrict commands or set a timeout
-	cmd := exec.Command("powershell", "-Command", command)
+	var cmd *exec.Cmd
+	if runtime.GOOS == "windows" {
+		cmd = exec.Command("powershell", "-Command", command)
+	} else {
+		cmd = exec.Command("sh", "-c", command)
+	}
+
 	output, err := cmd.CombinedOutput()
 	if err != nil {
 		return string(output), fmt.Errorf("command failed: %w", err)
