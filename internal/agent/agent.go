@@ -116,6 +116,21 @@ func LoadAgent(conf config.Config, agentID string) (AgentWorkspace, provider.LLM
 	}
 
 	prov := provider.MakeProvider(pc)
+
+	// Migration: Ensure 'reply' tool is enabled for all existing agents
+	// since it's now essential for multi-message/async feedback.
+	hasReply := false
+	for _, t := range ws.Config.Tools {
+		if t == "reply" {
+			hasReply = true
+			break
+		}
+	}
+	if !hasReply {
+		ws.Config.Tools = append(ws.Config.Tools, "reply")
+		_ = SaveAgentWorkspace(ws)
+	}
+
 	return ws, prov, modName, nil
 }
 

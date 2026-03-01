@@ -151,19 +151,29 @@ func (r *Router) processMessage(ctx context.Context, msg Message) {
 		// Check for tool call
 		matches := toolCallRegex.FindAllStringSubmatch(resp, -1)
 		if len(matches) > 0 {
-			// If there's conversational text before the call, send it!
-			callIdx := strings.Index(resp, "CALL:")
-			if callIdx > 0 {
-				prefix := strings.TrimSpace(resp[:callIdx])
-				if prefix != "" {
-					r.Reply(msg, prefix)
-				}
-			}
-
 			// Execute tool
 			match := matches[0]
 			toolName := match[1]
 			argsJSON := match[2]
+
+			callIdx := strings.Index(resp, "CALL:")
+			prefix := strings.TrimSpace(resp[:callIdx])
+
+			// Send prefix if it's not a reply tool OR if it's different from the reply text
+			if prefix != "" {
+				if toolName != "reply" {
+					r.Reply(msg, prefix)
+				} else {
+					// For 'reply', only send prefix if it doesn't match the reply text
+					var args map[string]interface{}
+					if err := json.Unmarshal([]byte(argsJSON), &args); err == nil {
+						txt, _ := args["text"].(string)
+						if strings.TrimSpace(prefix) != strings.TrimSpace(txt) {
+							r.Reply(msg, prefix)
+						}
+					}
+				}
+			}
 
 			// Explicitly handle 'reply' tool to send messages during the loop
 			if toolName == "reply" {
