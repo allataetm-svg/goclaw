@@ -162,13 +162,19 @@ func (r *Router) handleCommands(msg Message) bool {
 		return false
 	}
 
-	switch parts[0] {
+	// Handle case-insensitivity and bot suffixes like /agent@mybot
+	command := strings.ToLower(parts[0])
+	if strings.Contains(command, "@") {
+		command = strings.Split(command, "@")[0]
+	}
+
+	switch command {
 	case "/agent":
 		if len(parts) < 2 {
 			r.Reply(msg, "Usage: /agent list|switch <id>")
 			return true
 		}
-		switch parts[1] {
+		switch strings.ToLower(parts[1]) {
 		case "list":
 			agents, _ := agent.ListAgents()
 			list := "Installed Agents:\n"

@@ -156,7 +156,9 @@ func Run() {
 		}
 	}
 
-	conf.DefaultAgent = ws.Config.ID
+	if conf.DefaultAgent == "" {
+		conf.DefaultAgent = ws.Config.ID
+	}
 	conf.MaxTokens = 8000
 
 	// Step 4: Channels configuration

@@ -85,11 +85,19 @@ func manageSingleAgent(id string) {
 
 	for {
 		var action string
+		conf, _ := config.Load()
+		isDefault := conf.DefaultAgent == id
+		defaultLabel := ""
+		if isDefault {
+			defaultLabel = " (CURRENT DEFAULT)"
+		}
+
 		huh.NewForm(
 			huh.NewGroup(
 				huh.NewSelect[string]().
-					Title(fmt.Sprintf("Managing Agent: %s", ws.Config.Name)).
+					Title(fmt.Sprintf("Managing Agent: %s%s", ws.Config.Name, defaultLabel)).
 					Options(
+						huh.NewOption("Set as Default", "set_default"),
 						huh.NewOption("Edit Soul (SOUL.md)", "soul"),
 						huh.NewOption("Edit Mission (AGENT.md)", "agent"),
 						huh.NewOption("Change Model", "model"),
@@ -105,6 +113,10 @@ func manageSingleAgent(id string) {
 		}
 
 		switch action {
+		case "set_default":
+			conf.DefaultAgent = id
+			config.Save(conf)
+			fmt.Printf("✅ %s is now the default agent.\n", ws.Config.Name)
 		case "soul":
 			var newSoul = ws.Soul
 			huh.NewForm(
