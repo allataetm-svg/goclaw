@@ -62,9 +62,11 @@ When a user sends a message (e.g., via Telegram), the system follows this sequen
 ### 🛡️ Security & Pairing (OpenClaw Style)
 GoClaw includes a pairing system to prevent unauthorized access to your agents:
 1.  **Enable Pairing**: Can be enabled during `onboard` or via `manage` -> Security.
-2.  **Unauthorized Users**: If enabled, unknown users will be blocked and asked for a pairing code.
-3.  **Authorization**: Users must send `/pair <YOUR_CODE>` once.
-4.  **Whitelist**: Once successfully paired, the user's ID is added to the persistent whitelist in `config.json`.
+2.  **Request Access**: When an unknown user sends a message, GoClaw blocks it and generates a 6-digit code.
+3.  **Owner Approval**: The owner will see a log in the gateway console:
+    `[SECURITY] To approve this user, run: goclaw pairing approve Telegram <USER_ID> <CODE>`
+4.  **CLI Authorization**: The owner runs the command in a terminal to authorize the user.
+5.  **Persistent Access**: Once approved, the user is added to `AllowedUsers` and can chat freely.
 
 ---
 
@@ -122,10 +124,12 @@ Bir kullanıcı mesaj gönderdiğinde (örneğin Telegram üzerinden), sistem ş
 ---
 
 ### 🛡️ Güvenlik ve Eşleştirme (Pairing)
-GoClaw, ajanlarınıza yetkisiz erişimi engellemek için bir eşleştirme sistemi içerir:
+GoClaw, ajanlarınıza yetkisiz erişimi engellemek için bir eşleştirme (OpenClaw tarzı) sistemi içerir:
 1.  **Etkinleştirme**: `onboard` kurulumu sırasında veya `manage` -> Security menüsünden aktif edilebilir.
-2.  **Yetkisiz Kullanıcılar**: Sistem aktifse, tanınmayan kullanıcıların mesajları engellenir ve bir kod istenir.
-3.  **Yetkilendirme**: Kullanıcıların bir kez `/pair <KODUNUZ>` komutunu göndermesi gerekir.
-4.  **Beyaz Liste**: Başarıyla eşleşen kullanıcıların ID'leri `config.json` dosyasındaki beyaz listeye kalıcı olarak eklenir.
+2.  **Erişim Talebi**: Tanınmayan bir kullanıcı mesaj attığında, sistem mesajı engeller ve 6 haneli bir eşleşme kodu oluşturur.
+3.  **Sahip Onayı**: Gateway konsolunda şu şekilde bir log görünür:
+    `[SECURITY] To approve this user, run: goclaw pairing approve Telegram <USER_ID> <KOD>`
+4.  **CLI Üzerinden Yetki**: Sahibi, terminalden bu komutu çalıştırarak kullanıcıya erişim verir.
+5.  **Kalıcı Yetki**: Onaylanan kullanıcı beyaz listeye eklenir ve bir daha kod gerekmez.
 
 ---

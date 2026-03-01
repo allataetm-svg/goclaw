@@ -4,9 +4,11 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"math/rand"
 	"regexp"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/allataetm-svg/goclaw/internal/agent"
 	"github.com/allataetm-svg/goclaw/internal/config"
@@ -373,31 +375,42 @@ func (r *Router) handlePairing(msg Message) bool {
 		return false
 	}
 
-	parts := strings.Fields(msg.Text)
-	if len(parts) < 2 || strings.ToLower(parts[0]) != "/pair" {
+	// This is now purely an internal check for blocked users.
+	// Users don't use /pair anymore. We generate a code and log it.
+	if r.isUserAllowed(msg.FromID) {
 		return false
 	}
 
-	code := parts[1]
-	if r.config.PairingCode != "" && code == r.config.PairingCode {
-		r.mu.Lock()
-		alreadyAllowed := false
-		for _, u := range r.config.AllowedUsers {
-			if u == msg.FromID {
-				alreadyAllowed = true
-				break
-			}
-		}
-		if !alreadyAllowed {
-			r.config.AllowedUsers = append(r.config.AllowedUsers, msg.FromID)
-			_ = config.Save(r.config) // Persist
-		}
-		r.mu.Unlock()
-		r.Reply(msg, "✅ Pairing successful! You are now authorized to use GoClaw.")
-		return true
+	// Create a 6-digit random code
+	src := rand.NewSource(time.Now().UnixNano())
+	rnd := rand.New(src)
+	code := fmt.Sprintf("%06d", rnd.Intn(1000000))
+
+	// Find the channel type (e.g. Telegram)
+	r.mu.RLock()
+	ch, _ := r.channels[msg.ChannelID]
+	r.mu.RUnlock()
+	chType := "Unknown"
+	if ch != nil {
+		chType = strings.Title(ch.Type()) // Capitalize Telegram, Console, etc.
 	}
 
-	r.Reply(msg, "❌ Invalid pairing code.")
+	// Save to pending (persistently so the approve command can see it)
+	pairings, _ := config.LoadPendingPairings()
+	pairings = append(pairings, config.PendingPairing{
+		ChannelID: msg.ChannelID,
+		UserID:    msg.FromID,
+		Code:      code,
+	})
+	_ = config.SavePendingPairings(pairings)
+
+	// LOG THE COMMAND AS REQUESTED
+	fmt.Printf("\n[SECURITY] 🔓 Pairing required for %s user: %s\n", chType, msg.FromID)
+	fmt.Printf("[SECURITY] Run this command to authorize:\n")
+	fmt.Printf("   goclaw pairing approve \"%s\" \"%s\" \"%s\"\n\n", chType, msg.FromID, code)
+
+	// Inform user
+	r.Reply(msg, "🔐 This GoClaw instance is locked. Access request sent to owner.")
 	return true
 }
 

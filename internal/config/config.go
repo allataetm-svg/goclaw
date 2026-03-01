@@ -72,3 +72,78 @@ func Save(conf Config) error {
 	}
 	return nil
 }
+
+type PendingPairing struct {
+	ChannelID string `json:"channel_id"`
+	UserID    string `json:"user_id"`
+	Code      string `json:"code"`
+}
+
+func GetPairingPath() string {
+	return filepath.Join(GetConfigDir(), "pairing.json")
+}
+
+func LoadPendingPairings() ([]PendingPairing, error) {
+	data, err := os.ReadFile(GetPairingPath())
+	if err != nil {
+		if os.IsNotExist(err) {
+			return []PendingPairing{}, nil
+		}
+		return nil, err
+	}
+	var pairings []PendingPairing
+	if err := json.Unmarshal(data, &pairings); err != nil {
+		return nil, err
+	}
+	return pairings, nil
+}
+
+func SavePendingPairings(pairings []PendingPairing) error {
+	data, err := json.MarshalIndent(pairings, "", "  ")
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(GetPairingPath(), data, 0644)
+}
+
+func ApprovePairing(userID string, code string) error {
+	pairings, err := LoadPendingPairings()
+	if err != nil {
+		return err
+	}
+
+	foundIdx := -1
+	for i, p := range pairings {
+		if p.UserID == userID && p.Code == code {
+			foundIdx = i
+			break
+		}
+	}
+
+	if foundIdx == -1 {
+		return fmt.Errorf("pairing request for user %s with code %s not found", userID, code)
+	}
+
+	// Remove from pending
+	pairings = append(pairings[:foundIdx], pairings[foundIdx+1:]...)
+	_ = SavePendingPairings(pairings)
+
+	// Add to allowed in main config
+	conf, err := Load()
+	if err != nil {
+		return err
+	}
+
+	alreadyAllowed := false
+	for _, u := range conf.AllowedUsers {
+		if u == userID {
+			alreadyAllowed = true
+			break
+		}
+	}
+	if !alreadyAllowed {
+		conf.AllowedUsers = append(conf.AllowedUsers, userID)
+		return Save(conf)
+	}
+	return nil
+}
