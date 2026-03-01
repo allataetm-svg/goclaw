@@ -129,6 +129,7 @@ func (r *Router) processMessage(ctx context.Context, msg Message) {
 	r.mu.Unlock()
 
 	// 4. Agent Loop (multi-turn tool calling)
+	var latestSent string    // Cache of the last significant text piece sent to UI
 	for i := 0; i < 5; i++ { // Limit to 5 iterations for safety
 		select {
 		case <-ctx.Done():
@@ -163,6 +164,7 @@ func (r *Router) processMessage(ctx context.Context, msg Message) {
 			if prefix != "" {
 				if toolName != "reply" {
 					r.Reply(msg, prefix)
+					latestSent = prefix
 				} else {
 					// For 'reply', only send prefix if it doesn't match the reply text
 					var args map[string]interface{}
@@ -170,6 +172,7 @@ func (r *Router) processMessage(ctx context.Context, msg Message) {
 						txt, _ := args["text"].(string)
 						if strings.TrimSpace(prefix) != strings.TrimSpace(txt) {
 							r.Reply(msg, prefix)
+							latestSent = prefix
 						}
 					}
 				}
@@ -181,6 +184,7 @@ func (r *Router) processMessage(ctx context.Context, msg Message) {
 				if err := json.Unmarshal([]byte(argsJSON), &args); err == nil {
 					if txt, ok := args["text"].(string); ok && txt != "" {
 						r.Reply(msg, txt)
+						latestSent = txt
 					}
 				}
 			}
@@ -200,7 +204,21 @@ func (r *Router) processMessage(ctx context.Context, msg Message) {
 		// Usually if it's the last iteration or no tool call, we send the whole thing.
 		// If we already sent a prefix, we might want to send the suffix too, but models usually stop after a call.
 		if len(matches) == 0 {
-			r.Reply(msg, resp)
+			// If we previously sent a reply/prefix, check if this response repeats it.
+			// Simple check: starts with OR is very similar (we'll just use starts with for now)
+			toSend := resp
+			trimmedLatest := strings.TrimSpace(latestSent)
+			if trimmedLatest != "" && strings.HasPrefix(strings.TrimSpace(resp), trimmedLatest) {
+				// Strip the repetition
+				toSend = strings.TrimSpace(strings.TrimPrefix(strings.TrimSpace(resp), trimmedLatest))
+				// Also strip leading punctuation often added after repetition
+				toSend = strings.TrimSpace(strings.TrimPrefix(toSend, "."))
+				toSend = strings.TrimSpace(strings.TrimPrefix(toSend, "!"))
+			}
+
+			if toSend != "" {
+				r.Reply(msg, toSend)
+			}
 		}
 		break
 	}
