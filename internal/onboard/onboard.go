@@ -159,6 +159,47 @@ func Run() {
 	conf.DefaultAgent = ws.Config.ID
 	conf.MaxTokens = 8000
 
+	// Step 4: Channels configuration
+	var addTelegram bool
+	err = huh.NewForm(
+		huh.NewGroup(
+			huh.NewConfirm().
+				Title("Would you like to add a Telegram Bot channel?").
+				Value(&addTelegram),
+		),
+	).Run()
+
+	if addTelegram {
+		var tgToken string
+		var tgName string
+		err = huh.NewForm(
+			huh.NewGroup(
+				huh.NewInput().
+					Title("Telegram Bot Token:").
+					Description("Get this from @BotFather").
+					Value(&tgToken),
+				huh.NewInput().
+					Title("Channel Display Name:").
+					Value(&tgName),
+			),
+		).Run()
+
+		if tgToken != "" {
+			if tgName == "" {
+				tgName = "Telegram Bot"
+			}
+			conf.Channels = append(conf.Channels, config.ChannelConfig{
+				ID:      "telegram_main",
+				Type:    "telegram",
+				Name:    tgName,
+				AgentID: ws.Config.ID, // Link to the first agent by default
+				Settings: map[string]string{
+					"token": tgToken,
+				},
+			})
+		}
+	}
+
 	if err := config.Save(conf); err != nil {
 		fmt.Printf("Failed to save config: %v\n", err)
 		return
@@ -166,5 +207,9 @@ func Run() {
 
 	fmt.Println("\nSetup complete!")
 	fmt.Printf("Agent Name: %s\nID: %s\nSelected LLM: %s\n", ws.Config.Name, ws.Config.ID, ws.Config.Model)
-	fmt.Println("\nTo start chatting: goclaw tui")
+	if len(conf.Channels) > 0 {
+		fmt.Printf("Active Channels: %d\n", len(conf.Channels))
+	}
+	fmt.Println("\nTo start chatting (TUI): goclaw tui")
+	fmt.Println("To start the gateway: goclaw gateway")
 }
