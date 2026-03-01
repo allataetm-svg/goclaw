@@ -1,0 +1,11 @@
+# Binaries
+goclaw
+goclaw.exe
+goclaw_linux_amd64
+
+# Config and History (User specific)
+.goclaw/
+
+# OS files
+.DS_Store
+Thumbs.db
