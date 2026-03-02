@@ -17,6 +17,26 @@ import (
 	"github.com/allataetm-svg/goclaw/internal/tui"
 )
 
+func enhanceInputWithMemory(input string, memStore *memory.UserMemoryStore) string {
+	mems := memStore.List()
+	if len(mems) == 0 {
+		return input
+	}
+
+	seen := make(map[string]bool)
+	var memContext []string
+	memContext = append(memContext, "## User Context (from memory)")
+	for _, mem := range mems {
+		if !seen[mem.Key] {
+			memContext = append(memContext, fmt.Sprintf("- %s: %s", mem.Key, mem.Value))
+			seen[mem.Key] = true
+		}
+	}
+
+	enhanced := strings.Join(memContext, "\n") + "\n\n## User Message:\n" + input
+	return enhanced
+}
+
 func main() {
 	if len(os.Args) < 2 {
 		printUsage()
@@ -92,6 +112,9 @@ func runCLI() {
 	fmt.Printf("🦞 GoClaw CLI [%s] — Model: %s\n", ws.Config.Name, modName)
 	fmt.Println("Type /help for commands, /exit to quit.\n")
 
+	memStore := memory.NewUserMemoryStore(agentID)
+	_ = memStore.Load()
+
 	history := []provider.ChatMessage{
 		{Role: "system", Content: agent.BuildSystemPrompt(ws)},
 	}
@@ -115,7 +138,8 @@ func runCLI() {
 			continue
 		}
 
-		history = append(history, provider.ChatMessage{Role: "user", Content: input})
+		enhancedInput := enhanceInputWithMemory(input, memStore)
+		history = append(history, provider.ChatMessage{Role: "user", Content: enhancedInput})
 
 		fmt.Printf("%s: ", ws.Config.Name)
 

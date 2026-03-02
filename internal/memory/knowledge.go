@@ -74,7 +74,9 @@ func (ks *KnowledgeStore) rebuildIndex() {
 	ks.index = make(map[string][]int)
 	for i, doc := range ks.documents {
 		words := extractWords(doc.Content)
-		words = append(words, doc.Tags...)
+		for _, tag := range doc.Tags {
+			words = append(words, strings.ToLower(tag))
+		}
 		for _, word := range words {
 			ks.index[word] = append(ks.index[word], i)
 		}
@@ -90,7 +92,7 @@ func extractWords(text string) []string {
 	var result []string
 	seen := make(map[string]bool)
 	for _, w := range words {
-		if len(w) > 2 && !seen[w] {
+		if len(w) >= 2 && !seen[w] {
 			seen[w] = true
 			result = append(result, w)
 		}
