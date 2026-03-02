@@ -110,7 +110,7 @@ func runCLI() {
 	}
 
 	fmt.Printf("🦞 GoClaw CLI [%s] — Model: %s\n", ws.Config.Name, modName)
-	fmt.Println("Type /help for commands, /exit to quit.\n")
+	fmt.Println("Type /help for commands, /exit to quit.")
 
 	memStore := memory.NewUserMemoryStore(agentID)
 	_ = memStore.Load()
