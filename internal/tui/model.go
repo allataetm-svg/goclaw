@@ -161,8 +161,10 @@ func (m Model) appendSystem(msg string) Model {
 }
 
 func (m Model) updateViewport() Model {
-	m.viewport.SetContent(lipgloss.NewStyle().Width(m.viewport.Width).Render(strings.Join(m.messages, "\n\n")))
-	m.viewport.GotoBottom()
+	if m.viewport.Width > 0 && m.viewport.Height > 0 {
+		m.viewport.SetContent(lipgloss.NewStyle().Width(m.viewport.Width).Render(strings.Join(m.messages, "\n\n")))
+		m.viewport.GotoBottom()
+	}
 	return m
 }
 
