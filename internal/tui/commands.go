@@ -24,10 +24,18 @@ func (m Model) processSlashCommand(cmd string) (Model, tea.Cmd) {
   /agent add <name> <prov:model> — Add new agent
   /agent delete <id>       — Delete an agent
   /agent soul <id> <text>  — Edit agent soul prompt
+  /agent instructions <id> <text> — Edit agent instructions
   /model [provider:model]  — View or change model
   /history list            — List saved conversations
   /history load <id>       — Load a conversation
   /history delete <id>     — Delete a conversation
+  /memory store <key> <value> — Store user memory
+  /memory recall <query>   — Search memories
+  /memory list             — List all memories
+  /memory delete <id>      — Delete a memory
+  /knowledge add <content> — Add knowledge document
+  /knowledge search <query> — Search knowledge
+  /knowledge list          — List knowledge documents
   /clear                   — Clear chat memory
   /tokens                  — Show token usage
   /exit or /quit           — Exit app`
@@ -78,6 +86,12 @@ func (m Model) processSlashCommand(cmd string) (Model, tea.Cmd) {
 
 	case "/history":
 		return m.handleHistoryCommand(parts)
+
+	case "/memory":
+		return m.handleMemoryCommand(parts)
+
+	case "/knowledge":
+		return m.handleKnowledgeCommand(parts)
 
 	case "/exit", "/quit":
 		m.conversation.Messages = m.chatHistory
@@ -266,5 +280,152 @@ func (m Model) handleHistoryCommand(parts []string) (Model, tea.Cmd) {
 
 	default:
 		return m.appendSystem("Unknown history command. Usage: /history list|load|delete"), nil
+	}
+}
+
+func (m Model) handleMemoryCommand(parts []string) (Model, tea.Cmd) {
+	if len(parts) < 2 {
+		return m.appendSystem("Usage: /memory store <key> <value> | /memory recall <query> | /memory list | /memory delete <id>"), nil
+	}
+
+	subCmd := parts[1]
+	agentID := m.currentAgent.Config.ID
+
+	switch subCmd {
+	case "list":
+		memStore := memory.NewUserMemoryStore(agentID)
+		_ = memStore.Load()
+		mems := memStore.List()
+		if len(mems) == 0 {
+			return m.appendSystem("No memories stored."), nil
+		}
+		var output []string
+		output = append(output, "Stored Memories:")
+		for _, mem := range mems {
+			output = append(output, fmt.Sprintf("  [%s] %s: %s", mem.Type, mem.Key, mem.Value))
+		}
+		return m.appendSystem(strings.Join(output, "\n")), nil
+
+	case "store":
+		if len(parts) < 4 {
+			return m.appendSystem("Usage: /memory store <key> <value>"), nil
+		}
+		key := parts[2]
+		value := strings.Join(parts[3:], " ")
+		memStore := memory.NewUserMemoryStore(agentID)
+		_ = memStore.Load()
+		err := memStore.Store(memory.UserMemory{
+			Type:  memory.MemoryTypePreference,
+			Key:   key,
+			Value: value,
+		})
+		if err != nil {
+			return m.appendSystem("Error storing memory: " + err.Error()), nil
+		}
+		return m.appendSystem(fmt.Sprintf("Memory stored: %s = %s", key, value)), nil
+
+	case "recall":
+		if len(parts) < 3 {
+			return m.appendSystem("Usage: /memory recall <query>"), nil
+		}
+		query := strings.Join(parts[2:], " ")
+		memStore := memory.NewUserMemoryStore(agentID)
+		_ = memStore.Load()
+		results := memStore.Search(query)
+		if len(results) == 0 {
+			return m.appendSystem(fmt.Sprintf("No memories found for: %s", query)), nil
+		}
+		var output []string
+		output = append(output, "Found Memories:")
+		for _, mem := range results {
+			output = append(output, fmt.Sprintf("  [%s] %s: %s", mem.Type, mem.Key, mem.Value))
+		}
+		return m.appendSystem(strings.Join(output, "\n")), nil
+
+	case "delete":
+		if len(parts) < 3 {
+			return m.appendSystem("Usage: /memory delete <id>"), nil
+		}
+		memID := parts[2]
+		memStore := memory.NewUserMemoryStore(agentID)
+		_ = memStore.Load()
+		err := memStore.Delete(memID)
+		if err != nil {
+			return m.appendSystem("Error: " + err.Error()), nil
+		}
+		return m.appendSystem(fmt.Sprintf("Memory '%s' deleted.", memID)), nil
+
+	default:
+		return m.appendSystem("Unknown memory command. Usage: /memory store|recall|list|delete"), nil
+	}
+}
+
+func (m Model) handleKnowledgeCommand(parts []string) (Model, tea.Cmd) {
+	if len(parts) < 2 {
+		return m.appendSystem("Usage: /knowledge add <content> | /knowledge search <query> | /knowledge list"), nil
+	}
+
+	subCmd := parts[1]
+	agentID := m.currentAgent.Config.ID
+
+	switch subCmd {
+	case "list":
+		ks := memory.NewKnowledgeStore(agentID)
+		_ = ks.Load()
+		docs := ks.List()
+		if len(docs) == 0 {
+			return m.appendSystem("No knowledge documents."), nil
+		}
+		var output []string
+		output = append(output, "Knowledge Documents:")
+		for _, doc := range docs {
+			preview := doc.Content
+			if len(preview) > 50 {
+				preview = preview[:50] + "..."
+			}
+			output = append(output, fmt.Sprintf("  [%s] %s", doc.Source, preview))
+		}
+		return m.appendSystem(strings.Join(output, "\n")), nil
+
+	case "add":
+		if len(parts) < 3 {
+			return m.appendSystem("Usage: /knowledge add <content>"), nil
+		}
+		content := strings.Join(parts[2:], " ")
+		ks := memory.NewKnowledgeStore(agentID)
+		_ = ks.Load()
+		err := ks.AddDocument(memory.Document{
+			Content: content,
+			Source:  "manual",
+		})
+		if err != nil {
+			return m.appendSystem("Error adding knowledge: " + err.Error()), nil
+		}
+		return m.appendSystem("Knowledge document added."), nil
+
+	case "search":
+		if len(parts) < 3 {
+			return m.appendSystem("Usage: /knowledge search <query>"), nil
+		}
+		query := strings.Join(parts[2:], " ")
+		ks := memory.NewKnowledgeStore(agentID)
+		_ = ks.Load()
+		results := ks.Search(query, 5)
+		if len(results) == 0 {
+			return m.appendSystem(fmt.Sprintf("No knowledge found for: %s", query)), nil
+		}
+		var output []string
+		output = append(output, "Found Knowledge:")
+		for _, doc := range results {
+			preview := doc.Content
+			if len(preview) > 100 {
+				preview = preview[:100] + "..."
+			}
+			output = append(output, fmt.Sprintf("  [%s] %s", doc.Source, preview))
+		}
+		return m.appendSystem(strings.Join(output, "\n")), nil
+
+	default:
+		return m.appendSystem("Unknown knowledge command. Usage: /knowledge add|search|list"), nil
 	}
 }

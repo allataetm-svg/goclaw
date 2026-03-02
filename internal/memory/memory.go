@@ -1,154 +1,186 @@
 package memory
 
 import (
-	"encoding/json"
-	"fmt"
-	"os"
-	"path/filepath"
-	"sort"
-	"time"
-
-	"github.com/allataetm-svg/goclaw/internal/config"
 	"github.com/allataetm-svg/goclaw/internal/provider"
 )
 
-// Conversation represents a persistent chat conversation
-type Conversation struct {
-	ID        string                 `json:"id"`
-	AgentID   string                 `json:"agent_id"`
-	AgentName string                 `json:"agent_name"`
-	Messages  []provider.ChatMessage `json:"messages"`
-	CreatedAt time.Time              `json:"created_at"`
-	UpdatedAt time.Time              `json:"updated_at"`
+type Memory struct {
+	ephemeral *Ephemeral
+	session   *SessionManager
+	userStore *UserMemoryStore
+	knowledge *KnowledgeStore
+	agentID   string
 }
 
-// EstimateTokens estimates token count from text (~4 chars per token)
-func EstimateTokens(text string) int {
-	return len(text) / 4
+func NewMemory(agentID, systemPrompt string, maxTokens int) *Memory {
+	return &Memory{
+		ephemeral: NewEphemeral(systemPrompt, maxTokens),
+		session:   NewSessionManager(),
+		userStore: NewUserMemoryStore(agentID),
+		knowledge: NewKnowledgeStore(agentID),
+		agentID:   agentID,
+	}
 }
 
-// EstimateHistoryTokens estimates total tokens in a message history
-func EstimateHistoryTokens(messages []provider.ChatMessage) int {
-	total := 0
-	for _, m := range messages {
-		total += EstimateTokens(m.Content) + 4 // overhead per message for role etc.
+func (m *Memory) Initialize() error {
+	if err := m.userStore.Load(); err != nil {
+		return err
 	}
-	return total
-}
-
-// TrimHistory trims chat history to fit within maxTokens, keeping system prompt and most recent messages
-func TrimHistory(messages []provider.ChatMessage, maxTokens int) []provider.ChatMessage {
-	if maxTokens <= 0 || len(messages) <= 1 {
-		return messages
-	}
-
-	// Separate system messages from chat messages
-	var systemMessages []provider.ChatMessage
-	var chatMessages []provider.ChatMessage
-
-	for _, m := range messages {
-		if m.Role == "system" {
-			systemMessages = append(systemMessages, m)
-		} else {
-			chatMessages = append(chatMessages, m)
-		}
-	}
-
-	systemTokens := EstimateHistoryTokens(systemMessages)
-	remainingTokens := maxTokens - systemTokens
-
-	if remainingTokens <= 0 {
-		return systemMessages
-	}
-
-	// Trim oldest message pairs (user+assistant) from the beginning
-	trimmed := chatMessages
-	for EstimateHistoryTokens(trimmed) > remainingTokens && len(trimmed) > 2 {
-		trimmed = trimmed[2:] // Remove oldest user+assistant pair
-	}
-
-	result := make([]provider.ChatMessage, 0, len(systemMessages)+len(trimmed))
-	result = append(result, systemMessages...)
-	result = append(result, trimmed...)
-	return result
-}
-
-// --- Persistent History ---
-
-func getHistoryDir() string {
-	return filepath.Join(config.GetConfigDir(), "history")
-}
-
-// SaveConversation saves a conversation to disk
-func SaveConversation(conv Conversation) error {
-	dir := getHistoryDir()
-	if err := os.MkdirAll(dir, 0755); err != nil {
-		return fmt.Errorf("failed to create history dir: %w", err)
-	}
-	conv.UpdatedAt = time.Now()
-	data, err := json.MarshalIndent(conv, "", "  ")
-	if err != nil {
-		return fmt.Errorf("failed to marshal conversation: %w", err)
-	}
-	if err := os.WriteFile(filepath.Join(dir, conv.ID+".json"), data, 0644); err != nil {
-		return fmt.Errorf("failed to write conversation: %w", err)
+	if err := m.knowledge.Load(); err != nil {
+		return err
 	}
 	return nil
 }
 
-// LoadConversation loads a conversation from disk by ID
-func LoadConversation(id string) (Conversation, error) {
-	data, err := os.ReadFile(filepath.Join(getHistoryDir(), id+".json"))
-	if err != nil {
-		return Conversation{}, fmt.Errorf("failed to read conversation %s: %w", id, err)
-	}
-	var conv Conversation
-	if err := json.Unmarshal(data, &conv); err != nil {
-		return Conversation{}, fmt.Errorf("failed to parse conversation %s: %w", id, err)
-	}
-	return conv, nil
+func (m *Memory) SetSystemPrompt(prompt string) {
+	m.ephemeral.SetSystemPrompt(prompt)
 }
 
-// ListConversations lists all saved conversations, sorted by most recent
-func ListConversations() ([]Conversation, error) {
-	dir := getHistoryDir()
-	entries, err := os.ReadDir(dir)
-	if err != nil {
-		if os.IsNotExist(err) {
-			return nil, nil
-		}
-		return nil, fmt.Errorf("failed to read history dir: %w", err)
-	}
-
-	var convs []Conversation
-	for _, e := range entries {
-		if filepath.Ext(e.Name()) != ".json" {
-			continue
-		}
-		data, err := os.ReadFile(filepath.Join(dir, e.Name()))
-		if err != nil {
-			continue
-		}
-		var conv Conversation
-		if err := json.Unmarshal(data, &conv); err != nil {
-			continue
-		}
-		convs = append(convs, conv)
-	}
-
-	// Sort by UpdatedAt descending (most recent first)
-	sort.Slice(convs, func(i, j int) bool {
-		return convs[i].UpdatedAt.After(convs[j].UpdatedAt)
+func (m *Memory) AddUserMessage(content string) {
+	m.ephemeral.AddMessage(provider.ChatMessage{
+		Role:    "user",
+		Content: content,
 	})
-
-	return convs, nil
 }
 
-// DeleteConversation deletes a saved conversation by ID
-func DeleteConversation(id string) error {
-	path := filepath.Join(getHistoryDir(), id+".json")
-	if err := os.Remove(path); err != nil {
-		return fmt.Errorf("failed to delete conversation %s: %w", id, err)
+func (m *Memory) AddAssistantMessage(content string) {
+	m.ephemeral.AddMessage(provider.ChatMessage{
+		Role:    "assistant",
+		Content: content,
+	})
+}
+
+func (m *Memory) GetContext() []provider.ChatMessage {
+	return m.ephemeral.GetTrimmedMessages()
+}
+
+func (m *Memory) GetFullContext() []provider.ChatMessage {
+	return m.ephemeral.GetMessages()
+}
+
+func (m *Memory) ClearContext() {
+	m.ephemeral.Clear()
+}
+
+func (m *Memory) StartSession(task string) {
+	m.session.StartSession(task)
+}
+
+func (m *Memory) SetSessionGoal(goal string) {
+	m.session.SetGoal(goal)
+}
+
+func (m *Memory) AddSessionEntity(key, value string) {
+	m.session.AddEntity(key, value)
+}
+
+func (m *Memory) AddSessionStep(action, result string, success bool) {
+	m.session.AddStep(action, result, success)
+}
+
+func (m *Memory) EndSession() error {
+	if m.session.GetActiveSession() != nil {
+		return m.session.CompleteSession()
 	}
+	m.session.EndSession()
 	return nil
+}
+
+func (m *Memory) GetSessionState() interface{} {
+	return m.session.GetActiveSession()
+}
+
+func (m *Memory) StoreUserMemory(memType MemoryType, key, value, source string, tags []string) error {
+	mem := UserMemory{
+		Type:   memType,
+		Key:    key,
+		Value:  value,
+		Source: source,
+		Tags:   tags,
+	}
+	return m.userStore.Store(mem)
+}
+
+func (m *Memory) GetUserMemory(id string) (*UserMemory, error) {
+	return m.userStore.Get(id)
+}
+
+func (m *Memory) GetUserMemoryByKey(key string) (*UserMemory, error) {
+	return m.userStore.GetByKey(key)
+}
+
+func (m *Memory) ListUserMemories() []UserMemory {
+	return m.userStore.List()
+}
+
+func (m *Memory) SearchUserMemory(query string) []UserMemory {
+	return m.userStore.Search(query)
+}
+
+func (m *Memory) DeleteUserMemory(id string) error {
+	return m.userStore.Delete(id)
+}
+
+func (m *Memory) UpdateUserMemory(id, value string) error {
+	return m.userStore.Update(id, value)
+}
+
+func (m *Memory) AddKnowledgeDocument(content, source, url string, tags []string) error {
+	doc := Document{
+		Content: content,
+		Source:  source,
+		URL:     url,
+		Tags:    tags,
+	}
+	return m.knowledge.AddDocument(doc)
+}
+
+func (m *Memory) AddKnowledgeDocumentFromFile(path string) error {
+	return m.knowledge.AddDocumentFromFile(path)
+}
+
+func (m *Memory) SearchKnowledge(query string, limit int) []Document {
+	return m.knowledge.Search(query, limit)
+}
+
+func (m *Memory) ListKnowledgeDocuments() []Document {
+	return m.knowledge.List()
+}
+
+func (m *Memory) GetKnowledgeDocument(id string) (*Document, error) {
+	return m.knowledge.Get(id)
+}
+
+func (m *Memory) DeleteKnowledgeDocument(id string) error {
+	return m.knowledge.Delete(id)
+}
+
+func (m *Memory) CountUserMemories() int {
+	return m.userStore.Count()
+}
+
+func (m *Memory) CountKnowledgeDocuments() int {
+	return m.knowledge.Count()
+}
+
+func (m *Memory) EstimateContextTokens() int {
+	return m.ephemeral.EstimateTokens()
+}
+
+type MemoryStats struct {
+	ContextMessages int
+	ContextTokens   int
+	UserMemories    int
+	KnowledgeDocs   int
+	ActiveSession   bool
+}
+
+func (m *Memory) GetStats() MemoryStats {
+	return MemoryStats{
+		ContextMessages: m.ephemeral.CountMessages(),
+		ContextTokens:   m.ephemeral.EstimateTokens(),
+		UserMemories:    m.userStore.Count(),
+		KnowledgeDocs:   m.knowledge.Count(),
+		ActiveSession:   m.session.GetActiveSession() != nil,
+	}
 }

@@ -25,6 +25,11 @@ func BuildSystemPrompt(ws AgentWorkspace) string {
 		parts = append(parts, ws.Agent)
 	}
 
+	if ws.Instructions != "" {
+		parts = append(parts, "## Operational Instructions")
+		parts = append(parts, ws.Instructions)
+	}
+
 	// Tool descriptions
 	if len(ws.Config.Tools) > 0 {
 		parts = append(parts, "## Capabilities & Tools")
@@ -163,6 +168,34 @@ func AddAgent(name, model string, agentType AgentType) (AgentWorkspace, error) {
 		},
 		Soul:  "You are a helpful and intelligent AI assistant.",
 		Agent: "",
+		Instructions: `# Agent Operational Instructions
+
+## Session Management
+- Start each session by understanding the user's goal
+- Break complex tasks into manageable steps
+- Keep the user informed of progress
+- Ask for clarification when needed
+
+## Error Handling
+- When encountering errors, first try to understand the cause
+- If a tool fails, check the error message and try an alternative approach
+- Never repeat the same failing action twice
+- Report errors clearly to the user
+
+## Memory & Context
+- Extract important user preferences and facts for long-term memory
+- Use /memory commands to store important information
+- Search existing memories before asking for repeat information
+
+## Safety & Security
+- Never execute commands that could harm the system
+- Ask for confirmation before potentially destructive operations
+- Do not reveal sensitive information in responses
+
+## Best Practices
+- Use the reply tool to communicate with users
+- Provide concise, actionable responses
+- Learn from user feedback and adjust behavior`,
 	}
 
 	if err := SaveAgentWorkspace(ws); err != nil {

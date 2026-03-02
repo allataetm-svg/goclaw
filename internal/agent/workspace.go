@@ -25,9 +25,11 @@ type AgentConfig struct {
 }
 
 type AgentWorkspace struct {
-	Config AgentConfig
-	Soul   string
-	Agent  string
+	Config       AgentConfig
+	Soul         string
+	Agent        string
+	Instructions string
+	Capabilities string
 }
 
 func getAgentsDir() string {
@@ -71,7 +73,6 @@ func ListAgents() ([]AgentConfig, error) {
 func LoadAgentWorkspace(id string) (AgentWorkspace, error) {
 	dir := getAgentDir(id)
 
-	// Load config
 	configData, err := os.ReadFile(filepath.Join(dir, "config.json"))
 	if err != nil {
 		return AgentWorkspace{}, fmt.Errorf("agent config not found: %w", err)
@@ -82,16 +83,17 @@ func LoadAgentWorkspace(id string) (AgentWorkspace, error) {
 		return AgentWorkspace{}, fmt.Errorf("invalid agent config: %w", err)
 	}
 
-	// Load SOUL (optional)
 	soulData, _ := os.ReadFile(filepath.Join(dir, "SOUL.md"))
-
-	// Load AGENT (optional)
 	agentData, _ := os.ReadFile(filepath.Join(dir, "AGENT.md"))
+	instructionsData, _ := os.ReadFile(filepath.Join(dir, "INSTRUCTIONS.md"))
+	capabilitiesData, _ := os.ReadFile(filepath.Join(dir, "capabilities.yaml"))
 
 	return AgentWorkspace{
-		Config: cfg,
-		Soul:   string(soulData),
-		Agent:  string(agentData),
+		Config:       cfg,
+		Soul:         string(soulData),
+		Agent:        string(agentData),
+		Instructions: string(instructionsData),
+		Capabilities: string(capabilitiesData),
 	}, nil
 }
 
@@ -101,7 +103,6 @@ func SaveAgentWorkspace(workspace AgentWorkspace) error {
 		return fmt.Errorf("failed to create agent dir: %w", err)
 	}
 
-	// Save config
 	configData, err := json.MarshalIndent(workspace.Config, "", "  ")
 	if err != nil {
 		return fmt.Errorf("failed to marshal agent config: %w", err)
@@ -110,7 +111,6 @@ func SaveAgentWorkspace(workspace AgentWorkspace) error {
 		return fmt.Errorf("failed to write agent config: %w", err)
 	}
 
-	// Save SOUL
 	if workspace.Soul != "" {
 		if err := os.WriteFile(filepath.Join(dir, "SOUL.md"), []byte(workspace.Soul), 0644); err != nil {
 			return fmt.Errorf("failed to write SOUL.md: %w", err)
@@ -119,13 +119,28 @@ func SaveAgentWorkspace(workspace AgentWorkspace) error {
 		os.Remove(filepath.Join(dir, "SOUL.md"))
 	}
 
-	// Save AGENT
 	if workspace.Agent != "" {
 		if err := os.WriteFile(filepath.Join(dir, "AGENT.md"), []byte(workspace.Agent), 0644); err != nil {
 			return fmt.Errorf("failed to write AGENT.md: %w", err)
 		}
 	} else {
 		os.Remove(filepath.Join(dir, "AGENT.md"))
+	}
+
+	if workspace.Instructions != "" {
+		if err := os.WriteFile(filepath.Join(dir, "INSTRUCTIONS.md"), []byte(workspace.Instructions), 0644); err != nil {
+			return fmt.Errorf("failed to write INSTRUCTIONS.md: %w", err)
+		}
+	} else {
+		os.Remove(filepath.Join(dir, "INSTRUCTIONS.md"))
+	}
+
+	if workspace.Capabilities != "" {
+		if err := os.WriteFile(filepath.Join(dir, "capabilities.yaml"), []byte(workspace.Capabilities), 0644); err != nil {
+			return fmt.Errorf("failed to write capabilities.yaml: %w", err)
+		}
+	} else {
+		os.Remove(filepath.Join(dir, "capabilities.yaml"))
 	}
 
 	return nil
