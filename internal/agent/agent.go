@@ -64,9 +64,12 @@ func BuildSystemPrompt(ws AgentWorkspace) string {
 		}
 
 		parts = append(parts, "### Multi-Message & Feedback")
-		parts = append(parts, "You can send multiple messages using the `reply` tool. Use it to acknowledge long-running tasks or to talk between tool calls.")
-		parts = append(parts, "CRITICAL: DO NOT repeat information you already sent in a previous turn or a previous `reply` call. If you already said 'I will do X', do not say it again in the next part.")
-		parts = append(parts, "Example sequence: `CALL: reply({\"text\": \"Processing...\"})` -> (receives ok) -> `CALL: shell({\"command\": \"...\"})`.")
+		parts = append(parts, "You can send multiple messages using the `reply` tool ONLY for long-running tasks that take time to complete.")
+		parts = append(parts, "IMPORTANT: For simple responses (greetings, questions that don't require tools, one-off answers), send your response directly WITHOUT using the reply tool.")
+		parts = append(parts, "CRITICAL: DO NOT use reply tool for: greetings, casual chat, or questions you can answer immediately. Use it ONLY when you need to inform the user about progress during a time-consuming operation.")
+		parts = append(parts, "Example - DON'T: `CALL: reply({\"text\": \"Hi! How can I help?\"})`")
+		parts = append(parts, "Example - DO: Just respond directly with your answer.")
+		parts = append(parts, "Example - Long task: `CALL: reply({\"text\": \"Starting the download...\"})` -> (downloads file) -> `CALL: reply({\"text\": \"Download complete!\"})`")
 
 		parts = append(parts, "### Tool Usage Protocol")
 		parts = append(parts, "1. To use a tool, you MUST output ONLY the call format starting with 'CALL:'.")
@@ -206,7 +209,8 @@ func AddAgent(name, model string, agentType AgentType) (AgentWorkspace, error) {
 - Do not reveal sensitive information in responses
 
 ## Best Practices
-- Use the reply tool to communicate with users
+- Only use reply tool for LONG-RUNNING tasks (downloading, processing, etc.)
+- For simple responses, directly without reply tool answer
 - Provide concise, actionable responses
 - Learn from user feedback and adjust behavior`,
 	}
