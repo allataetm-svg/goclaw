@@ -64,12 +64,12 @@ func BuildSystemPrompt(ws AgentWorkspace) string {
 		}
 
 		parts = append(parts, "### Multi-Message & Feedback")
-		parts = append(parts, "You can send multiple messages using the `reply` tool ONLY for long-running tasks that take time to complete.")
-		parts = append(parts, "IMPORTANT: For simple responses (greetings, questions that don't require tools, one-off answers), send your response directly WITHOUT using the reply tool.")
-		parts = append(parts, "CRITICAL: DO NOT use reply tool for: greetings, casual chat, or questions you can answer immediately. Use it ONLY when you need to inform the user about progress during a time-consuming operation.")
-		parts = append(parts, "Example - DON'T: `CALL: reply({\"text\": \"Hi! How can I help?\"})`")
-		parts = append(parts, "Example - DO: Just respond directly with your answer.")
-		parts = append(parts, "Example - Long task: `CALL: reply({\"text\": \"Starting the download...\"})` -> (downloads file) -> `CALL: reply({\"text\": \"Download complete!\"})`")
+		parts = append(parts, "You can use the `reply` tool to send messages to users.")
+		parts = append(parts, "IMPORTANT: When using reply tool:")
+		parts = append(parts, "- Send ALL your information in ONE reply. DO NOT split into multiple messages.")
+		parts = append(parts, "- NEVER repeat information you already sent in previous messages or turns.")
+		parts = append(parts, "- Example CORRECT: `CALL: reply({\"text\": \"Your favorite color is blue! I've saved this to memory.\"})`")
+		parts = append(parts, "- Example WRONG: `CALL: reply({\"text\": \"Blue!\"})` then `CALL: reply({\"text\": \"I've saved it.\"})`")
 
 		parts = append(parts, "### Tool Usage Protocol")
 		parts = append(parts, "1. To use a tool, you MUST output ONLY the call format starting with 'CALL:'.")
@@ -209,10 +209,10 @@ func AddAgent(name, model string, agentType AgentType) (AgentWorkspace, error) {
 - Do not reveal sensitive information in responses
 
 ## Best Practices
-- Only use reply tool for LONG-RUNNING tasks (downloading, processing, etc.)
-- For simple responses, directly without reply tool answer
-- Provide concise, actionable responses
-- Learn from user feedback and adjust behavior`,
+- Use reply tool for all messages to users
+- Send complete information in ONE reply - never split messages
+- Never repeat information from previous messages
+- Be concise and direct`,
 	}
 
 	if err := SaveAgentWorkspace(ws); err != nil {
