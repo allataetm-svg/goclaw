@@ -244,17 +244,12 @@ func manageChannels() {
 func manageSecurity() {
 	conf, _ := config.Load()
 	var enabled bool = conf.PairingEnabled
-	var code string = conf.PairingCode
 
 	err := huh.NewForm(
 		huh.NewGroup(
 			huh.NewConfirm().
 				Title("Enable Pairing Mode? (Access Control)").
 				Value(&enabled),
-			huh.NewInput().
-				Title("Pairing Code:").
-				Description("Used by new users to authorize via /pair <code>").
-				Value(&code),
 		),
 	).Run()
 
@@ -263,7 +258,6 @@ func manageSecurity() {
 	}
 
 	conf.PairingEnabled = enabled
-	conf.PairingCode = code
 
 	fmt.Printf("\nAuthorized Users (%d):\n", len(conf.AllowedUsers))
 	for _, u := range conf.AllowedUsers {

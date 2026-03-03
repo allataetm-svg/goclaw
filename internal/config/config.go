@@ -27,7 +27,6 @@ type Config struct {
 	DefaultAgent   string           `json:"default_agent"`
 	MaxTokens      int              `json:"max_tokens,omitempty"`
 	PairingEnabled bool             `json:"pairing_enabled,omitempty"`
-	PairingCode    string           `json:"pairing_code,omitempty"`
 	AllowedUsers   []string         `json:"allowed_users,omitempty"` // Whitelist of FromIDs
 }
 

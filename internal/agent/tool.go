@@ -18,6 +18,12 @@ func init() {
 	RegisterTool(&ShellTool{})
 	RegisterTool(&ReplyTool{})
 	RegisterTool(&WebSearchTool{})
+	RegisterTool(&SchedulerTool{})
+	RegisterTool(&HeartbeatTool{})
+	RegisterTool(&SkillsTool{})
+	RegisterTool(&WebFetchTool{})
+	RegisterTool(&SessionsTool{})
+	RegisterTool(&SecretsTool{})
 }
 
 // Tool defines the interface for agent capabilities
