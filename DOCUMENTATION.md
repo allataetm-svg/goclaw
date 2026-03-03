@@ -22,7 +22,7 @@ The project is organized into modular packages under the `internal` directory:
 | `internal/manage` | Logic for the TUI-based management dashboard. |
 | `internal/onboard` | Initialization wizard for first-time setup. |
 | `internal/tui` | Terminal User Interface for direct chatting. |
-| `internal/memory` | Conversation history management. |
+| `internal/memory` | Enhanced memory system: Ephemeral, Long-term (User & Knowledge), and Context Compaction. |
 
 ---
 
@@ -90,7 +90,7 @@ Proje, `internal` dizini altındaki modüler paketlerden oluşur:
 | `internal/manage` | TUI tabanlı yönetim paneli mantığı. |
 | `internal/onboard` | İlk kurulum sihirbazı. |
 | `internal/tui` | Doğrudan sohbet için Terminal Kullanıcı Arayüzü. |
-| `internal/memory` | Sohbet geçmişi (bellek) yönetimi. |
+| `internal/memory` | Gelişmiş bellek sistemi: Kısa süreli (Efermal), Uzun süreli (Kullanıcı & Bilgi) ve Bağlam Sıkıştırma. |
 
 ---
 
@@ -131,5 +131,27 @@ GoClaw, ajanlarınıza yetkisiz erişimi engellemek için bir eşleştirme (Open
     `[SECURITY] To approve this user, run: goclaw pairing approve Telegram <USER_ID> <KOD>`
 4.  **CLI Üzerinden Yetki**: Sahibi, terminalden bu komutu çalıştırarak kullanıcıya erişim verir.
 5.  **Kalıcı Yetki**: Onaylanan kullanıcı beyaz listeye eklenir ve bir daha kod gerekmez.
+
+---
+
+### 🧠 Enhanced Memory System
+The memory system is divided into three layers:
+1.  **Ephemeral Memory**: Short-term conversation history maintained in the current session.
+2.  **Long-term Memory (User Store)**: Persistent storage for user-specific facts, preferences, and entities.
+3.  **Knowledge Store**: RAG-style document storage that allows agents to search and retrieve relevant information from added documents.
+4.  **Context Compaction**: Automatically summarizes message history or trims old messages when token limits are reached, ensuring stable performance during long conversations.
+
+---
+
+---
+
+## Türkçe
+
+### 🧠 Gelişmiş Bellek Sistemi
+Bellek sistemi üç ana katmandan oluşur:
+1.  **Kısa Süreli Bellek (Ephemeral)**: Mevcut oturumdaki anlık sohbet geçmişi.
+2.  **Uzun Süreli Bellek (User Store)**: Kullanıcıya özgü bilgilerin, tercihlerin ve varlıkların kalıcı olarak saklandığı alan.
+3.  **Bilgi Deposu (Knowledge Store)**: Ajanların eklenen belgelerden ilgili bilgileri arayıp bulmasını sağlayan RAG (Retrieval-Augmented Generation) tarzı doküman deposu.
+4.  **Bağlam Sıkıştırma (Context Compaction)**: Belirlenen token limitlerine ulaşıldığında mesaj geçmişini otomatik olarak özetler veya eski mesajları temizleyerek uzun sohbetlerde performansı korur.
 
 ---
