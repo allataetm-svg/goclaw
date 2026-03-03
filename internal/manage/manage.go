@@ -2,6 +2,7 @@ package manage
 
 import (
 	"fmt"
+	"strings"
 
 	"github.com/allataetm-svg/goclaw/internal/agent"
 	"github.com/allataetm-svg/goclaw/internal/config"
@@ -173,6 +174,14 @@ func manageSingleAgent(id string) {
 							huh.NewOption("Read File (read_file)", "read_file"),
 							huh.NewOption("Write File (write_file)", "write_file"),
 							huh.NewOption("Execute Shell (shell)", "shell"),
+							huh.NewOption("Reply (reply)", "reply"),
+							huh.NewOption("Web Search (web_search)", "web_search"),
+							huh.NewOption("Web Fetch (web_fetch)", "web_fetch"),
+							huh.NewOption("Scheduler (scheduler)", "scheduler"),
+							huh.NewOption("Heartbeat (heartbeat)", "heartbeat"),
+							huh.NewOption("Skills (skills)", "skills"),
+							huh.NewOption("Sessions (sessions)", "sessions"),
+							huh.NewOption("Secrets (secrets)", "secrets"),
 						).
 						Value(&selectedTools),
 				),
@@ -215,7 +224,7 @@ func manageChannels() {
 	for i, c := range conf.Channels {
 		options = append(options, huh.NewOption(fmt.Sprintf("%s (%s)", c.Name, c.Type), fmt.Sprintf("%d", i)))
 	}
-	options = append(options, huh.NewOption("Add New Channel", "add"))
+	options = append(options, huh.NewOption("Add Telegram Channel", "add_telegram"))
 	options = append(options, huh.NewOption("<- Back", "back"))
 
 	var selectIdx string
@@ -225,9 +234,8 @@ func manageChannels() {
 		return
 	}
 
-	if selectIdx == "add" {
-		// Just a placeholder for now to keep it concise
-		fmt.Println("To add a new channel, please use the 'onboard' wizard for now.")
+	if selectIdx == "add_telegram" {
+		addTelegramChannel()
 	} else {
 		// Manage existing channel (delete)
 		var confirm bool
@@ -237,8 +245,56 @@ func manageChannels() {
 			fmt.Sscanf(selectIdx, "%d", &idx)
 			conf.Channels = append(conf.Channels[:idx], conf.Channels[idx+1:]...)
 			config.Save(conf)
+			fmt.Println("✅ Channel deleted.")
 		}
 	}
+}
+
+func addTelegramChannel() {
+	var name string
+	var token string
+	var agentID string
+
+	agents, _ := agent.ListAgents()
+	agentOptions := make([]huh.Option[string], 0, len(agents))
+	for _, a := range agents {
+		agentOptions = append(agentOptions, huh.NewOption(fmt.Sprintf("%s (%s)", a.Name, a.ID), a.ID))
+	}
+
+	if len(agentOptions) == 0 {
+		fmt.Println("❌ No agents found. Create an agent first.")
+		return
+	}
+
+	err := huh.NewForm(
+		huh.NewGroup(
+			huh.NewInput().Title("Channel Name:").Value(&name),
+			huh.NewInput().Title("Telegram Bot Token:").Value(&token),
+			huh.NewSelect[string]().
+				Title("Default Agent for this Channel:").
+				Options(agentOptions...).
+				Value(&agentID),
+		),
+	).Run()
+
+	if err != nil || name == "" || token == "" {
+		fmt.Println("❌ Cancelled.")
+		return
+	}
+
+	conf, _ := config.Load()
+	id := fmt.Sprintf("telegram_%s", strings.ToLower(strings.ReplaceAll(name, " ", "_")))
+	conf.Channels = append(conf.Channels, config.ChannelConfig{
+		ID:      id,
+		Type:    "telegram",
+		Name:    name,
+		AgentID: agentID,
+		Settings: map[string]string{
+			"token": token,
+		},
+	})
+	config.Save(conf)
+	fmt.Printf("✅ Telegram channel '%s' added. Restart gateway to activate.\n", name)
 }
 
 func manageSecurity() {

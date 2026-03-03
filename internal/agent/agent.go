@@ -26,14 +26,14 @@ func BuildSystemPrompt(ws AgentWorkspace) string {
 	}
 
 	if ws.Instructions != "" {
-		parts = append(parts, "## Operational Instructions")
+		parts = append(parts, "## Instructions")
 		parts = append(parts, ws.Instructions)
 	}
 
 	// Tool descriptions
 	if len(ws.Config.Tools) > 0 {
-		parts = append(parts, "## Capabilities & Tools")
-		parts = append(parts, "You have access to specialized tools. You MUST use them when needed to fulfill the request.")
+		parts = append(parts, "## Tools")
+		parts = append(parts, "You have access to the following tools. Use them when needed.")
 
 		for _, toolName := range ws.Config.Tools {
 			if t, ok := GetTool(toolName); ok {
@@ -41,44 +41,29 @@ func BuildSystemPrompt(ws AgentWorkspace) string {
 			}
 		}
 
-		// Specialized instruction for delegate_task if available
-		hasDelegate := false
+		// Subagent info for delegate_task
 		for _, t := range ws.Config.Tools {
 			if t == "delegate_task" {
-				hasDelegate = true
+				if agents, err := ListAgents(); err == nil && len(agents) > 0 {
+					parts = append(parts, "\nAvailable subagents:")
+					for _, a := range agents {
+						if a.ID != ws.Config.ID {
+							parts = append(parts, fmt.Sprintf("- `%s` (%s, %s)", a.ID, a.Name, a.Model))
+						}
+					}
+				}
 				break
 			}
 		}
 
-		if hasDelegate {
-			parts = append(parts, "### Subagent Delegation")
-			parts = append(parts, "You can delegate complex tasks to other specialized agents using the `delegate_task` tool.")
-			if agents, err := ListAgents(); err == nil && len(agents) > 0 {
-				parts = append(parts, "Available subagents for delegation:")
-				for _, a := range agents {
-					if a.ID != ws.Config.ID {
-						parts = append(parts, fmt.Sprintf("- ID: `%s` | Name: %s | Model: %s", a.ID, a.Name, a.Model))
-					}
-				}
-			}
-		}
-
-		parts = append(parts, "### Multi-Message & Feedback")
-		parts = append(parts, "You can use the `reply` tool to send messages to users.")
-		parts = append(parts, "IMPORTANT: When using reply tool:")
-		parts = append(parts, "- Send ALL your information in ONE reply. DO NOT split into multiple messages.")
-		parts = append(parts, "- NEVER repeat information you already sent in previous messages or turns.")
-		parts = append(parts, "- Example CORRECT: `CALL: reply({\"text\": \"Your favorite color is blue! I've saved this to memory.\"})`")
-		parts = append(parts, "- Example WRONG: `CALL: reply({\"text\": \"Blue!\"})` then `CALL: reply({\"text\": \"I've saved it.\"})`")
-
-		parts = append(parts, "### Tool Usage Protocol")
-		parts = append(parts, "1. To use a tool, you MUST output ONLY the call format starting with 'CALL:'.")
-		parts = append(parts, "2. DO NOT include any conversational filler, markdown code blocks (```), or pre-text.")
-		parts = append(parts, "3. Arguments MUST be a valid JSON object inside the parentheses.")
-		parts = append(parts, "4. If you need information from a tool, STOP directly after the call and wait for the response.")
-		parts = append(parts, "5. DO NOT say 'I will use the tool' or 'Here is the result'. Just output the call.")
-		parts = append(parts, "Correct Example: `CALL: ToolName({\"key\": \"value\"})`")
-		parts = append(parts, "Incorrect Example: `Here is the file: CALL: ToolName(...)`")
+		parts = append(parts, `## Tool Protocol
+To call a tool, output ONLY: CALL: tool_name({"arg": "value"})
+Rules:
+- Output ONLY the CALL line — no commentary, no markdown fences, no preamble.
+- Arguments must be valid JSON.
+- After a CALL, STOP and wait for the result.
+- Use the reply tool to send messages. Combine all info into ONE reply.
+- Never repeat information from previous messages.`)
 	}
 
 	return strings.Join(parts, "\n\n")
@@ -126,33 +111,6 @@ func LoadAgent(conf config.Config, agentID string) (AgentWorkspace, provider.LLM
 
 	prov := provider.MakeProvider(pc)
 
-	// Migration: Ensure 'reply' tool is enabled for all existing agents
-	// since it's now essential for multi-message/async feedback.
-	hasReply := false
-	for _, t := range ws.Config.Tools {
-		if t == "reply" {
-			hasReply = true
-			break
-		}
-	}
-	if !hasReply {
-		ws.Config.Tools = append(ws.Config.Tools, "reply")
-		_ = SaveAgentWorkspace(ws)
-	}
-
-	// Migration: Ensure 'web_search' tool is enabled
-	hasWebSearch := false
-	for _, t := range ws.Config.Tools {
-		if t == "web_search" {
-			hasWebSearch = true
-			break
-		}
-	}
-	if !hasWebSearch {
-		ws.Config.Tools = append(ws.Config.Tools, "web_search")
-		_ = SaveAgentWorkspace(ws)
-	}
-
 	return ws, prov, modName, nil
 }
 
@@ -180,7 +138,7 @@ func AddAgent(name, model string, agentType AgentType) (AgentWorkspace, error) {
 			Type:  agentType,
 			Name:  name,
 			Model: model,
-			Tools: []string{"delegate_task", "read_file", "write_file", "shell", "reply", "web_search"},
+			Tools: []string{"delegate_task", "read_file", "write_file", "shell", "reply", "web_search", "web_fetch", "scheduler", "heartbeat", "skills", "sessions", "secrets"},
 		},
 		Soul:  "You are a helpful and intelligent AI assistant.",
 		Agent: "",

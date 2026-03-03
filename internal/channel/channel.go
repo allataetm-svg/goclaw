@@ -12,6 +12,7 @@ import (
 
 	"github.com/allataetm-svg/goclaw/internal/agent"
 	"github.com/allataetm-svg/goclaw/internal/config"
+	"github.com/allataetm-svg/goclaw/internal/memory"
 	"github.com/allataetm-svg/goclaw/internal/provider"
 )
 
@@ -33,13 +34,24 @@ type Channel interface {
 	Send(toID string, text string) error
 }
 
+// UsageMode controls per-response usage footer
+type UsageMode string
+
+const (
+	UsageOff    UsageMode = "off"
+	UsageTokens UsageMode = "tokens"
+	UsageFull   UsageMode = "full"
+)
+
 type Router struct {
 	config        config.Config
 	channels      map[string]Channel
-	sessions      map[string]string                 // Mapping of user/chat IDs to agent IDs
-	histories     map[string][]provider.ChatMessage // In-memory history for current gateway session
-	activeTasks   map[string]context.CancelFunc     // Active processing contexts per user
-	pairingCounts map[string]int                    // Track pairing attempts (max 3)
+	sessions      map[string]string                  // user/chat ID -> agent ID
+	histories     map[string][]provider.ChatMessage  // In-memory history
+	memStores     map[string]*memory.UserMemoryStore // user/agent -> memory store
+	activeTasks   map[string]context.CancelFunc
+	pairingCounts map[string]int
+	usageModes    map[string]UsageMode // per-user usage display mode
 	mu            sync.RWMutex
 }
 
@@ -49,8 +61,10 @@ func NewRouter(conf config.Config) *Router {
 		channels:      make(map[string]Channel),
 		sessions:      make(map[string]string),
 		histories:     make(map[string][]provider.ChatMessage),
+		memStores:     make(map[string]*memory.UserMemoryStore),
 		activeTasks:   make(map[string]context.CancelFunc),
 		pairingCounts: make(map[string]int),
+		usageModes:    make(map[string]UsageMode),
 	}
 }
 
@@ -82,12 +96,12 @@ func (r *Router) HandleIncoming(msg Message) {
 		return
 	}
 
-	// 3. Check for routing commands for authorized users
+	// 3. Check for routing/chat commands
 	if r.handleCommands(msg) {
 		return
 	}
 
-	// 2. Interrupt existing task if any
+	// 4. Interrupt existing task if any
 	r.mu.Lock()
 	if cancel, exists := r.activeTasks[msg.FromID]; exists {
 		cancel()
@@ -99,6 +113,46 @@ func (r *Router) HandleIncoming(msg Message) {
 	go r.processMessage(ctx, msg)
 }
 
+func (r *Router) getAgentID(userID string) string {
+	r.mu.RLock()
+	agentID, exists := r.sessions[userID]
+	r.mu.RUnlock()
+	if !exists {
+		agentID = r.config.DefaultAgent
+	}
+	return agentID
+}
+
+func (r *Router) getMemoryStore(userID, agentID string) *memory.UserMemoryStore {
+	key := userID + ":" + agentID
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if ms, ok := r.memStores[key]; ok {
+		return ms
+	}
+	ms := memory.NewUserMemoryStore(agentID)
+	_ = ms.Load()
+	r.memStores[key] = ms
+	return ms
+}
+
+func (r *Router) enhanceWithMemory(input string, memStore *memory.UserMemoryStore) string {
+	mems := memStore.List()
+	if len(mems) == 0 {
+		return input
+	}
+	seen := make(map[string]bool)
+	var memContext []string
+	memContext = append(memContext, "[User Context]")
+	for _, mem := range mems {
+		if !seen[mem.Key] {
+			memContext = append(memContext, fmt.Sprintf("- %s: %s", mem.Key, mem.Value))
+			seen[mem.Key] = true
+		}
+	}
+	return strings.Join(memContext, "\n") + "\n\n" + input
+}
+
 func (r *Router) processMessage(ctx context.Context, msg Message) {
 	defer func() {
 		r.mu.Lock()
@@ -106,23 +160,20 @@ func (r *Router) processMessage(ctx context.Context, msg Message) {
 		r.mu.Unlock()
 	}()
 
-	// 1. Identify target agent
-	r.mu.RLock()
-	agentID, exists := r.sessions[msg.FromID]
-	r.mu.RUnlock()
+	agentID := r.getAgentID(msg.FromID)
 
-	if !exists {
-		agentID = r.config.DefaultAgent
-	}
-
-	// 2. Load agent workspace
+	// Load agent workspace
 	ws, prov, mod, err := agent.LoadAgent(r.config, agentID)
 	if err != nil {
 		r.Reply(msg, fmt.Sprintf("Error loading agent %s: %v", agentID, err))
 		return
 	}
 
-	// 3. Update and prepare history
+	// Load memory and enhance input
+	memStore := r.getMemoryStore(msg.FromID, agentID)
+	enhancedInput := r.enhanceWithMemory(msg.Text, memStore)
+
+	// Prepare history
 	r.mu.Lock()
 	history := r.histories[msg.FromID]
 
@@ -138,14 +189,19 @@ func (r *Router) processMessage(ctx context.Context, msg Message) {
 			Content: agent.BuildSystemPrompt(ws),
 		})
 	}
-	history = append(history, provider.ChatMessage{Role: "user", Content: msg.Text})
+	history = append(history, provider.ChatMessage{Role: "user", Content: enhancedInput})
+
+	// Auto-compact if approaching token limit
+	history, compactMsg := memory.CompactLongHistory(history, r.config.MaxTokens)
+	if compactMsg != "" {
+		fmt.Printf("[Memory] %s for user %s\n", compactMsg, msg.FromID)
+	}
+
 	r.histories[msg.FromID] = history
 	r.mu.Unlock()
 
-	// 4. Agent Loop (multi-turn tool calling)
-	var latestSent string // Cache of the last significant text piece sent to UI
-	isFirstTurn := true
-	for i := 0; i < 5; i++ { // Limit to 5 iterations for safety
+	// Agent Loop (multi-turn tool calling) — up to 10 iterations like OpenClaw
+	for i := 0; i < 10; i++ {
 		select {
 		case <-ctx.Done():
 			return
@@ -167,123 +223,66 @@ func (r *Router) processMessage(ctx context.Context, msg Message) {
 		// Check for tool call
 		matches := toolCallRegex.FindAllStringSubmatch(resp, -1)
 		if len(matches) > 0 {
-			// Execute tool
 			match := matches[0]
 			toolName := match[1]
 			argsJSON := match[2]
 
-			callIdx := strings.Index(resp, "CALL:")
-			prefix := strings.TrimSpace(resp[:callIdx])
-
-			// IMPROVED: If prefix starts with latestSent (case-insensitive), strip it to avoid repetition
-			if latestSent != "" {
-				lsLower := strings.ToLower(strings.TrimSpace(latestSent))
-				pLower := strings.ToLower(strings.TrimSpace(prefix))
-				if strings.HasPrefix(pLower, lsLower) {
-					prefix = strings.TrimSpace(prefix[len(lsLower):])
-				} else {
-					// Also strip common greetings if NOT first turn
-					if !isFirstTurn {
-						prefix = stripGreetings(prefix)
-					}
-				}
-				prefix = strings.TrimSpace(strings.TrimPrefix(prefix, "."))
-				prefix = strings.TrimSpace(strings.TrimPrefix(prefix, ","))
-				prefix = strings.TrimSpace(strings.TrimPrefix(prefix, "!"))
-			}
-
-			// Send prefix if it's not a reply tool OR if it's different from the reply text
-			if prefix != "" {
-				if toolName != "reply" {
-					r.Reply(msg, prefix)
-					latestSent = prefix
-				} else {
-					// For 'reply', only send prefix if it doesn't match the reply text
-					var args map[string]interface{}
-					if err := json.Unmarshal([]byte(argsJSON), &args); err == nil {
-						txt, _ := args["text"].(string)
-						if strings.TrimSpace(prefix) != strings.TrimSpace(txt) {
-							r.Reply(msg, prefix)
-							latestSent = prefix
-						}
-					}
-				}
-			}
-
-			// Explicitly handle 'reply' tool to send messages during the loop
+			// Handle reply tool — send the text to the user
 			if toolName == "reply" {
 				var args map[string]interface{}
 				if err := json.Unmarshal([]byte(argsJSON), &args); err == nil {
 					if txt, ok := args["text"].(string); ok && txt != "" {
 						r.Reply(msg, txt)
-						latestSent = txt
+						// Append usage footer if enabled
+						r.appendUsageFooter(msg)
 					}
 				}
 			}
 
 			toolResp, ok := r.executeTool(ctx, ws, toolName, argsJSON)
 			if ok {
-				// Feed tool output back and continue loop
+				// Feed tool result back as context
 				r.mu.Lock()
-				history = append(r.histories[msg.FromID], provider.ChatMessage{Role: "user", Content: toolResp})
+				toolResultMsg := fmt.Sprintf("[Tool Result: %s]\n%s", toolName, toolResp)
+				history = append(r.histories[msg.FromID], provider.ChatMessage{Role: "user", Content: toolResultMsg})
 				r.histories[msg.FromID] = history
 				r.mu.Unlock()
-				isFirstTurn = false
 				continue
 			}
 		}
 
-		// No more tools, just reply with the response (or the remaining part after tool call)
-		// Usually if it's the last iteration or no tool call, we send the whole thing.
-		// If we already sent a prefix, we might want to send the suffix too, but models usually stop after a call.
-		if len(matches) == 0 {
-			toSend := resp
-			if !isFirstTurn {
-				toSend = stripGreetings(toSend)
-			}
-			trimmedLatest := strings.ToLower(strings.TrimSpace(latestSent))
-			trimmedResp := strings.ToLower(strings.TrimSpace(toSend))
-
-			if trimmedLatest != "" && strings.HasPrefix(trimmedResp, trimmedLatest) {
-				// Strip the repetition from the original resp ( preserving case for the rest)
-				startIdx := strings.Index(strings.ToLower(toSend), trimmedLatest)
-				if startIdx != -1 {
-					toSend = strings.TrimSpace(toSend[startIdx+len(trimmedLatest):])
-					toSend = strings.TrimSpace(strings.TrimPrefix(toSend, "."))
-					toSend = strings.TrimSpace(strings.TrimPrefix(toSend, "!"))
-					toSend = strings.TrimSpace(strings.TrimPrefix(toSend, "?"))
-				}
-			}
-
-			if toSend != "" {
-				r.Reply(msg, toSend)
-			}
+		// No tool call — send the response directly
+		if len(matches) == 0 && resp != "" {
+			r.Reply(msg, resp)
+			r.appendUsageFooter(msg)
 		}
-		break // Exit loop if no tool call
+		break
 	}
 }
 
-func stripGreetings(text string) string {
-	greetings := []string{
-		"selam", "merhaba", "hos geldin", "hoş geldin", "nasılsın", "nasilsin",
-		"hello", "hi", "hey", "greetings", "how can i help", "yardımcı olabilirim",
+func (r *Router) appendUsageFooter(msg Message) {
+	r.mu.RLock()
+	mode := r.usageModes[msg.FromID]
+	h := r.histories[msg.FromID]
+	r.mu.RUnlock()
+
+	if mode == "" || mode == UsageOff {
+		return
 	}
-	lower := strings.ToLower(text)
-	found := true
-	for found {
-		found = false
-		for _, g := range greetings {
-			if strings.HasPrefix(lower, g) {
-				text = strings.TrimSpace(text[len(g):])
-				// Clean punctuation
-				text = strings.TrimSpace(strings.TrimLeft(text, "!,.-?👋😊"))
-				lower = strings.ToLower(text)
-				found = true
-				break
-			}
-		}
+
+	chars := 0
+	for _, m := range h {
+		chars += len(m.Content)
 	}
-	return text
+	tokens := chars / 4
+
+	switch mode {
+	case UsageTokens:
+		r.Reply(msg, fmt.Sprintf("📊 ~%d tokens", tokens))
+	case UsageFull:
+		pct := float64(tokens) / float64(r.config.MaxTokens) * 100
+		r.Reply(msg, fmt.Sprintf("📊 ~%d / %d tokens (%.1f%%) | %d messages", tokens, r.config.MaxTokens, pct, len(h)))
+	}
 }
 
 var toolCallRegex = regexp.MustCompile(`(?s)CALL:\s*(\w+)\s*\((.*?)\)`)
@@ -332,21 +331,88 @@ func (r *Router) handleCommands(msg Message) bool {
 
 	switch command {
 	case "/help":
-		helpText := "🦞 GoClaw Gateway Commands:\n"
-		helpText += "- /agent list: Show all installed agents\n"
-		helpText += "- /agent switch <id>: Switch to a different agent\n"
-		helpText += "- /clear: Reset current chat history\n"
-		helpText += "- /history: Show current chat history entries\n"
-		helpText += "- /tokens: (TODO) Show token estimation\n"
-		helpText += "- /help: Show this message\n"
+		helpText := `🦞 GoClaw Commands:
+- /agent list — list installed agents
+- /agent switch <id> — switch agent
+- /status — session status (model + tokens)
+- /new, /reset — reset session
+- /clear — clear chat history
+- /compact — compact context
+- /usage off|tokens|full — usage footer
+- /tokens — token estimate
+- /history — show history
+- /help — this message`
 		r.Reply(msg, helpText)
 		return true
-	case "/clear":
+
+	case "/clear", "/new", "/reset":
 		r.mu.Lock()
 		delete(r.histories, msg.FromID)
 		r.mu.Unlock()
-		r.Reply(msg, "✅ Chat history cleared.")
+		r.Reply(msg, "✅ Session reset.")
 		return true
+
+	case "/status":
+		agentID := r.getAgentID(msg.FromID)
+		ws, _, mod, err := agent.LoadAgent(r.config, agentID)
+		if err != nil {
+			r.Reply(msg, fmt.Sprintf("Error: %v", err))
+			return true
+		}
+		r.mu.RLock()
+		h := r.histories[msg.FromID]
+		r.mu.RUnlock()
+		chars := 0
+		for _, m := range h {
+			chars += len(m.Content)
+		}
+		tokens := chars / 4
+		pct := float64(tokens) / float64(r.config.MaxTokens) * 100
+		status := fmt.Sprintf("🦞 **%s**\nModel: `%s`\nTokens: ~%d / %d (%.1f%%)\nMessages: %d",
+			ws.Config.Name, mod, tokens, r.config.MaxTokens, pct, len(h))
+		r.Reply(msg, status)
+		return true
+
+	case "/compact":
+		r.mu.Lock()
+		h := r.histories[msg.FromID]
+		compacted, info := memory.CompactLongHistory(h, r.config.MaxTokens/2)
+		r.histories[msg.FromID] = compacted
+		r.mu.Unlock()
+		if info != "" {
+			r.Reply(msg, fmt.Sprintf("✅ %s", info))
+		} else {
+			r.Reply(msg, "✅ Context compacted.")
+		}
+		return true
+
+	case "/usage":
+		if len(parts) < 2 {
+			r.Reply(msg, "Usage: /usage off|tokens|full")
+			return true
+		}
+		mode := strings.ToLower(parts[1])
+		switch mode {
+		case "off":
+			r.mu.Lock()
+			r.usageModes[msg.FromID] = UsageOff
+			r.mu.Unlock()
+			r.Reply(msg, "Usage footer disabled.")
+		case "tokens":
+			r.mu.Lock()
+			r.usageModes[msg.FromID] = UsageTokens
+			r.mu.Unlock()
+			r.Reply(msg, "Usage footer: tokens only.")
+		case "full":
+			r.mu.Lock()
+			r.usageModes[msg.FromID] = UsageFull
+			r.mu.Unlock()
+			r.Reply(msg, "Usage footer: full details.")
+		default:
+			r.Reply(msg, "Usage: /usage off|tokens|full")
+		}
+		return true
+
 	case "/history":
 		r.mu.RLock()
 		h := r.histories[msg.FromID]
@@ -357,10 +423,15 @@ func (r *Router) handleCommands(msg Message) bool {
 		}
 		text := fmt.Sprintf("History (%d messages):\n", len(h))
 		for i, m := range h {
-			text += fmt.Sprintf("%d. [%s]: %s\n", i+1, m.Role, strings.Split(m.Content, "\n")[0])
+			firstLine := strings.Split(m.Content, "\n")[0]
+			if len(firstLine) > 80 {
+				firstLine = firstLine[:80] + "..."
+			}
+			text += fmt.Sprintf("%d. [%s]: %s\n", i+1, m.Role, firstLine)
 		}
 		r.Reply(msg, text)
 		return true
+
 	case "/tokens":
 		r.mu.RLock()
 		h := r.histories[msg.FromID]
@@ -369,8 +440,11 @@ func (r *Router) handleCommands(msg Message) bool {
 		for _, m := range h {
 			chars += len(m.Content)
 		}
-		r.Reply(msg, fmt.Sprintf("Estimated tokens: ~%d (based on character count/4)", chars/4))
+		tokens := chars / 4
+		pct := float64(tokens) / float64(r.config.MaxTokens) * 100
+		r.Reply(msg, fmt.Sprintf("📊 Tokens: ~%d / %d (%.1f%%)", tokens, r.config.MaxTokens, pct))
 		return true
+
 	case "/agent":
 		if len(parts) < 2 {
 			r.Reply(msg, "Usage: /agent list|switch <id>")
@@ -380,8 +454,13 @@ func (r *Router) handleCommands(msg Message) bool {
 		case "list":
 			agents, _ := agent.ListAgents()
 			list := "Installed Agents:\n"
+			currentAgent := r.getAgentID(msg.FromID)
 			for _, a := range agents {
-				list += fmt.Sprintf("- %s (ID: %s)\n", a.Name, a.ID)
+				marker := ""
+				if a.ID == currentAgent {
+					marker = " ← active"
+				}
+				list += fmt.Sprintf("- %s (ID: %s)%s\n", a.Name, a.ID, marker)
 			}
 			r.Reply(msg, list)
 			return true
@@ -409,7 +488,7 @@ func (r *Router) isUserAllowed(userID string) bool {
 		return true
 	}
 
-	// Dynamic check: attempt to reload config to pick up new approvals from CLI
+	// Dynamic reload to pick up CLI approvals
 	if updated, err := config.Load(); err == nil {
 		r.mu.Lock()
 		r.config = updated
@@ -452,7 +531,7 @@ func (r *Router) handlePairing(msg Message) bool {
 	r.mu.RUnlock()
 	chType := "Unknown"
 	if ch != nil {
-		chType = strings.Title(ch.Type())
+		chType = capitalizeFirst(ch.Type())
 	}
 
 	// Save to pending
@@ -476,6 +555,14 @@ func (r *Router) handlePairing(msg Message) bool {
 	return true
 }
 
+// capitalizeFirst replaces deprecated strings.Title
+func capitalizeFirst(s string) string {
+	if s == "" {
+		return s
+	}
+	return strings.ToUpper(s[:1]) + s[1:]
+}
+
 func (r *Router) Reply(msg Message, text string) error {
 	r.mu.RLock()
 	ch, exists := r.channels[msg.ChannelID]
@@ -492,6 +579,6 @@ func (r *Router) SetSession(userID, agentID string) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	r.sessions[userID] = agentID
-	// Clear history when switching agent to maintain context integrity
+	// Clear history when switching agent
 	delete(r.histories, userID)
 }

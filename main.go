@@ -14,6 +14,8 @@ import (
 	"github.com/allataetm-svg/goclaw/internal/memory"
 	"github.com/allataetm-svg/goclaw/internal/onboard"
 	"github.com/allataetm-svg/goclaw/internal/provider"
+	"github.com/allataetm-svg/goclaw/internal/scheduler"
+	"github.com/allataetm-svg/goclaw/internal/sessions"
 	"github.com/allataetm-svg/goclaw/internal/tui"
 )
 
@@ -144,29 +146,32 @@ func runCLI() {
 		fmt.Printf("%s: ", ws.Config.Name)
 
 		ch := make(chan provider.StreamChunk)
+		var fullResponse strings.Builder
+		var streamErr error
+		done := make(chan struct{})
+
 		go func() {
 			for chunk := range ch {
 				if chunk.Error != nil {
-					fmt.Printf("\nError: %v\n", chunk.Error)
-					return
+					streamErr = chunk.Error
+					continue
 				}
 				fmt.Print(chunk.Text)
-				if chunk.Done {
-					break
-				}
+				fullResponse.WriteString(chunk.Text)
 			}
+			close(done)
 		}()
 
 		prov.QueryStream(context.Background(), modName, history, ch)
+		<-done
 
-		if err != nil {
-			fmt.Printf("\n❌ Error: %v\n", err)
+		if streamErr != nil {
+			fmt.Printf("\n❌ Error: %v\n", streamErr)
 			history = history[:len(history)-1]
 			continue
 		}
 
-		lastMsg := history[len(history)-1]
-		history = append(history, provider.ChatMessage{Role: "assistant", Content: lastMsg.Content})
+		history = append(history, provider.ChatMessage{Role: "assistant", Content: fullResponse.String()})
 		fmt.Println()
 	}
 }
@@ -400,6 +405,13 @@ func gateway() {
 		return
 	}
 
+	// Initialize sessions and scheduler
+	_ = sessions.LoadSessions()
+	_ = scheduler.LoadTasks()
+	ctx := context.Background()
+	_ = scheduler.Start(ctx)
+	fmt.Println("[Scheduler] Started background scheduler.")
+
 	router := channel.NewRouter(conf)
 
 	console := channel.NewConsoleChannel("cli", "Main Console", conf.DefaultAgent)
@@ -434,7 +446,7 @@ func gateway() {
 }
 
 func handlePairingCommand() {
-	if len(os.Args) < 5 {
+	if len(os.Args) < 6 {
 		fmt.Println("Usage: goclaw pairing approve <channel> <userID> <code>")
 		return
 	}
@@ -445,6 +457,7 @@ func handlePairingCommand() {
 		return
 	}
 
+	// os.Args: [goclaw, pairing, approve, <channel>, <userID>, <code>]
 	userID := os.Args[4]
 	code := os.Args[5]
 

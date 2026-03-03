@@ -5,8 +5,10 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"regexp"
+	"runtime"
 	"sync"
 	"time"
 
@@ -215,6 +217,20 @@ func executeTask(ctx context.Context, t *Task) {
 	SaveTasks()
 
 	fmt.Printf("[Scheduler] Running task: %s (%s)\n", t.Name, t.Command)
+
+	var cmd *exec.Cmd
+	if runtime.GOOS == "windows" {
+		cmd = exec.CommandContext(ctx, "powershell", "-Command", t.Command)
+	} else {
+		cmd = exec.CommandContext(ctx, "sh", "-c", t.Command)
+	}
+
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		fmt.Printf("[Scheduler] Task %s failed: %v\nOutput: %s\n", t.Name, err, string(output))
+		return
+	}
+	fmt.Printf("[Scheduler] Task %s completed.\nOutput: %s\n", t.Name, string(output))
 }
 
 func matchesCron(t time.Time, expr string) bool {
