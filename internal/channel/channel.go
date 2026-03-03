@@ -136,21 +136,25 @@ func (r *Router) getMemoryStore(userID, agentID string) *memory.UserMemoryStore 
 	return ms
 }
 
-func (r *Router) enhanceWithMemory(input string, memStore *memory.UserMemoryStore) string {
-	mems := memStore.List()
-	if len(mems) == 0 {
-		return input
-	}
-	seen := make(map[string]bool)
+func (r *Router) enhanceWithMemory(msg Message, memStore *memory.UserMemoryStore) string {
 	var memContext []string
-	memContext = append(memContext, "[User Context]")
-	for _, mem := range mems {
-		if !seen[mem.Key] {
-			memContext = append(memContext, fmt.Sprintf("- %s: %s", mem.Key, mem.Value))
-			seen[mem.Key] = true
+
+	userInfo := fmt.Sprintf("# USER.md\nUser ID: %s", msg.FromID)
+	memContext = append(memContext, userInfo)
+
+	mems := memStore.List()
+	if len(mems) > 0 {
+		seen := make(map[string]bool)
+		memContext = append(memContext, "\n# MEMORY.md\nLearned facts about this user:")
+		for _, mem := range mems {
+			if !seen[mem.Key] {
+				memContext = append(memContext, fmt.Sprintf("- %s: %s", mem.Key, mem.Value))
+				seen[mem.Key] = true
+			}
 		}
 	}
-	return strings.Join(memContext, "\n") + "\n\n" + input
+
+	return strings.Join(memContext, "\n") + "\n\n" + msg.Text
 }
 
 func (r *Router) processMessage(ctx context.Context, msg Message) {
@@ -171,7 +175,7 @@ func (r *Router) processMessage(ctx context.Context, msg Message) {
 
 	// Load memory and enhance input
 	memStore := r.getMemoryStore(msg.FromID, agentID)
-	enhancedInput := r.enhanceWithMemory(msg.Text, memStore)
+	enhancedInput := r.enhanceWithMemory(msg, memStore)
 
 	// Prepare history
 	r.mu.Lock()
@@ -237,20 +241,6 @@ func (r *Router) processMessage(ctx context.Context, msg Message) {
 				if preText != "" {
 					r.Reply(msg, preText)
 				}
-			}
-
-			// Handle reply tool — send the text to the user
-			if toolName == "reply" {
-				var args map[string]interface{}
-				if err := json.Unmarshal([]byte(argsJSON), &args); err == nil {
-					if txt, ok := args["text"].(string); ok && txt != "" {
-						r.Reply(msg, txt)
-						r.appendUsageFooter(msg)
-					}
-				}
-				// If the tool is reply, we consider it the final action of this turn.
-				// By breaking, we prevent the agent from infinitely double-replying.
-				break
 			}
 
 			toolResp, ok := r.executeTool(ctx, ws, toolName, argsJSON)

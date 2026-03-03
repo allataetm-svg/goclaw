@@ -16,7 +16,6 @@ func init() {
 	RegisterTool(&ReadFileTool{})
 	RegisterTool(&WriteFileTool{})
 	RegisterTool(&ShellTool{})
-	RegisterTool(&ReplyTool{})
 	RegisterTool(&WebSearchTool{})
 	RegisterTool(&SchedulerTool{})
 	RegisterTool(&HeartbeatTool{})
@@ -135,20 +134,4 @@ func (t *ShellTool) Execute(ctx context.Context, args map[string]interface{}, _ 
 		return string(output), fmt.Errorf("command failed: %w", err)
 	}
 	return string(output), nil
-}
-
-// ReplyTool allows an agent to send a message and continue processing
-type ReplyTool struct{}
-
-func (t *ReplyTool) Name() string { return "reply" }
-func (t *ReplyTool) Description() string {
-	return "Sends an immediate reply to the user. Use this to acknowledge requests or provide updates before continuing. Args: { \"text\": \"string\" }"
-}
-func (t *ReplyTool) Execute(ctx context.Context, args map[string]interface{}, _ config.Config) (string, error) {
-	text, _ := args["text"].(string)
-	if text == "" {
-		return "Reply content is empty.", nil
-	}
-	// The actual sending is handled in channel.go's processMessage loop if it sees a tool call.
-	return fmt.Sprintf("User received: %s", text), nil
 }

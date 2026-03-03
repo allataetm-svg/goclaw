@@ -174,7 +174,6 @@ func manageSingleAgent(id string) {
 							huh.NewOption("Read File (read_file)", "read_file"),
 							huh.NewOption("Write File (write_file)", "write_file"),
 							huh.NewOption("Execute Shell (shell)", "shell"),
-							huh.NewOption("Reply (reply)", "reply"),
 							huh.NewOption("Web Search (web_search)", "web_search"),
 							huh.NewOption("Web Fetch (web_fetch)", "web_fetch"),
 							huh.NewOption("Scheduler (scheduler)", "scheduler"),

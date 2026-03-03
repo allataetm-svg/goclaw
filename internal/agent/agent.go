@@ -13,44 +13,41 @@ import (
 func BuildSystemPrompt(ws AgentWorkspace) string {
 	var parts []string
 
-	parts = append(parts, fmt.Sprintf("Your name is %s.", ws.Config.Name))
+	parts = append(parts, fmt.Sprintf("# OVERVIEW.md\nYour name is %s.", ws.Config.Name))
 
 	if ws.Soul != "" {
-		parts = append(parts, "## Persona")
-		parts = append(parts, ws.Soul)
+		parts = append(parts, "# SOUL.md\n"+ws.Soul)
 	}
 
 	if ws.Agent != "" {
-		parts = append(parts, "## Primary Mission")
-		parts = append(parts, ws.Agent)
+		parts = append(parts, "# AGENT.md\n"+ws.Agent)
 	}
 
 	if ws.Instructions != "" {
-		parts = append(parts, "## Instructions")
-		parts = append(parts, ws.Instructions)
+		parts = append(parts, "# INSTRUCTIONS.md\n"+ws.Instructions)
 	}
 
 	// Tool descriptions
 	if len(ws.Config.Tools) > 0 {
-		parts = append(parts, "## Tools")
-		parts = append(parts, "You have access to the following tools. Use them when needed.")
-
+		toolList := "# CAPABILITIES.md\nYou have access to the following tools:\n\n"
 		for _, toolName := range ws.Config.Tools {
 			if t, ok := GetTool(toolName); ok {
-				parts = append(parts, fmt.Sprintf("- **%s**: %s", t.Name(), t.Description()))
+				toolList += fmt.Sprintf("- **%s**: %s\n", t.Name(), t.Description())
 			}
 		}
+		parts = append(parts, toolList)
 
 		// Subagent info for delegate_task
 		for _, t := range ws.Config.Tools {
 			if t == "delegate_task" {
 				if agents, err := ListAgents(); err == nil && len(agents) > 0 {
-					parts = append(parts, "\nAvailable subagents:")
+					agentList := "# AGENTS.md\nAvailable subagents:\n"
 					for _, a := range agents {
 						if a.ID != ws.Config.ID {
-							parts = append(parts, fmt.Sprintf("- `%s` (%s, %s)", a.ID, a.Name, a.Model))
+							agentList += fmt.Sprintf("- `%s` (%s, %s)\n", a.ID, a.Name, a.Model)
 						}
 					}
+					parts = append(parts, agentList)
 				}
 				break
 			}
