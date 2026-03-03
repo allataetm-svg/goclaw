@@ -118,7 +118,7 @@ func addHeartbeat(args map[string]interface{}) (string, error) {
 		return "", err
 	}
 
-	return fmt.Sprintf("Heartbeat '%s' added successfully (min interval: %d minutes).", name, intervalMin), nil
+	return fmt.Sprintf("Heartbeat '%s' added successfully (min interval: %d minutes).", name, int(intervalMin)), nil
 }
 
 func truncate(s string, maxLen int) string {
