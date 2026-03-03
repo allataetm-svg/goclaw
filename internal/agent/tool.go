@@ -17,6 +17,7 @@ func init() {
 	RegisterTool(&WriteFileTool{})
 	RegisterTool(&ShellTool{})
 	RegisterTool(&ReplyTool{})
+	RegisterTool(&WebSearchTool{})
 }
 
 // Tool defines the interface for agent capabilities
