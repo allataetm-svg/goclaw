@@ -210,6 +210,9 @@ func (r *Router) processMessage(ctx context.Context, msg Message) {
 
 		resp, err := prov.Query(ctx, mod, history)
 		if err != nil {
+			if strings.Contains(err.Error(), "context canceled") || err == context.Canceled {
+				return // User interrupted the task, silently abort
+			}
 			r.Reply(msg, fmt.Sprintf("Error: %v", err))
 			return
 		}
@@ -221,11 +224,20 @@ func (r *Router) processMessage(ctx context.Context, msg Message) {
 		r.mu.Unlock()
 
 		// Check for tool call
-		matches := toolCallRegex.FindAllStringSubmatch(resp, -1)
-		if len(matches) > 0 {
-			match := matches[0]
-			toolName := match[1]
-			argsJSON := match[2]
+		matches := toolCallRegex.FindStringSubmatch(resp)
+		matchIdx := toolCallRegex.FindStringIndex(resp)
+
+		if len(matches) > 0 && len(matchIdx) > 0 {
+			toolName := matches[1]
+			argsJSON := matches[2]
+
+			// Send any text before the tool call as an intermediate message
+			if matchIdx[0] > 0 {
+				preText := strings.TrimSpace(resp[:matchIdx[0]])
+				if preText != "" {
+					r.Reply(msg, preText)
+				}
+			}
 
 			// Handle reply tool — send the text to the user
 			if toolName == "reply" {
@@ -233,10 +245,12 @@ func (r *Router) processMessage(ctx context.Context, msg Message) {
 				if err := json.Unmarshal([]byte(argsJSON), &args); err == nil {
 					if txt, ok := args["text"].(string); ok && txt != "" {
 						r.Reply(msg, txt)
-						// Append usage footer if enabled
 						r.appendUsageFooter(msg)
 					}
 				}
+				// If the tool is reply, we consider it the final action of this turn.
+				// By breaking, we prevent the agent from infinitely double-replying.
+				break
 			}
 
 			toolResp, ok := r.executeTool(ctx, ws, toolName, argsJSON)
