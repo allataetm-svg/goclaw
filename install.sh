@@ -2,8 +2,6 @@
 
 # GoClaw Clean Install Script
 
-set -e
-
 echo "🦞 GoClaw Kurulum Scripti"
 
 # Platform detection
@@ -33,27 +31,65 @@ esac
 
 echo "Platform: $PLATFORM"
 
+# Detect install location
+if [ -w /usr/local/bin ]; then
+    INSTALL_DIR="/usr/local/bin"
+    SUDO=""
+elif [ -w "$HOME/bin" ]; then
+    INSTALL_DIR="$HOME/bin"
+    SUDO=""
+else
+    INSTALL_DIR="/usr/local/bin"
+    SUDO="sudo"
+fi
+
+echo "Kurulum dizini: $INSTALL_DIR"
+
 # Remove old goclaw
 echo "Eski goclaw kaldırılıyor..."
-sudo rm -f /usr/local/bin/goclaw 2>/dev/null || true
+rm -f "$INSTALL_DIR/goclaw" 2>/dev/null || true
 rm -f ./goclaw 2>/dev/null || true
 
 # Download new binary
 echo "Yeni goclaw indiriliyor..."
-curl -L -o goclaw "https://raw.githubusercontent.com/allataetm-svg/goclaw/feature/enhanced-memory-system/goclaw-${PLATFORM}"
+URL="https://raw.githubusercontent.com/allataetm-svg/goclaw/feature/enhanced-memory-system/goclaw-${PLATFORM}"
+echo "URL: $URL"
+
+if ! curl -fSL -o goclaw "$URL"; then
+    echo "❌ İndirme başarısız!"
+    echo "Alternatif olarak şunu deneyin:"
+    echo "  wget -O goclaw '$URL'"
+    exit 1
+fi
 
 # Make executable
 chmod +x goclaw
 
+# Verify file
+echo "İndirilen dosya kontrol ediliyor..."
+if [ ! -s goclaw ]; then
+    echo "❌ İndirilen dosya boş veya hatalı"
+    exit 1
+fi
+
+FILE_TYPE=$(file goclaw)
+echo "Dosya tipi: $FILE_TYPE"
+
 # Install
 echo "Kuruluyor..."
-sudo mv goclaw /usr/local/bin/goclaw
+if ! $SUDO mv goclaw "$INSTALL_DIR/goclaw"; then
+    echo "❌ Kurulum başarısız - izinleri kontrol edin"
+    exit 1
+fi
 
 # Verify
-if goclaw --help > /dev/null 2>&1; then
+echo "Doğrulanıyor..."
+if "$INSTALL_DIR/goclaw" --help > /dev/null 2>&1; then
     echo "✅ GoClaw başarıyla kuruldu!"
-    goclaw --help
+    echo ""
+    "$INSTALL_DIR/goclaw" --help
 else
-    echo "❌ Kurulum başarısız"
+    echo "❌ Doğrulama başarısız"
+    echo "Dosya tipi: $(file $INSTALL_DIR/goclaw)"
     exit 1
 fi
