@@ -137,6 +137,19 @@ func LoadAgent(conf config.Config, agentID string) (AgentWorkspace, provider.LLM
 		_ = SaveAgentWorkspace(ws)
 	}
 
+	// Migration: Ensure 'web_search' tool is enabled
+	hasWebSearch := false
+	for _, t := range ws.Config.Tools {
+		if t == "web_search" {
+			hasWebSearch = true
+			break
+		}
+	}
+	if !hasWebSearch {
+		ws.Config.Tools = append(ws.Config.Tools, "web_search")
+		_ = SaveAgentWorkspace(ws)
+	}
+
 	return ws, prov, modName, nil
 }
 
@@ -164,7 +177,7 @@ func AddAgent(name, model string, agentType AgentType) (AgentWorkspace, error) {
 			Type:  agentType,
 			Name:  name,
 			Model: model,
-			Tools: []string{"delegate_task", "read_file", "write_file", "shell", "reply"},
+			Tools: []string{"delegate_task", "read_file", "write_file", "shell", "reply", "web_search"},
 		},
 		Soul:  "You are a helpful and intelligent AI assistant.",
 		Agent: "",
