@@ -1,234 +1,133 @@
 package skills
 
 import (
-	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
-	"sync"
 
 	"github.com/allataetm-svg/goclaw/internal/config"
+	"gopkg.in/yaml.v3"
 )
 
 type Skill struct {
-	ID          string            `json:"id"`
-	Name        string            `json:"name"`
-	Description string            `json:"description"`
-	Version     string            `json:"version"`
-	Source      string            `json:"source"` // workspace, global, builtin
-	Tools       []string          `json:"tools"`
-	Prompts     []SkillPrompt     `json:"prompts"`
-	Metadata    map[string]string `json:"metadata,omitempty"`
+	Name          string        `yaml:"name"`
+	Description   string        `yaml:"description"`
+	Version       string        `yaml:"version,omitempty"`
+	Author        string        `yaml:"author,omitempty"`
+	Triggers      []string      `yaml:"triggers,omitempty"`
+	Tools         []string      `yaml:"tools,omitempty"`
+	Env           []string      `yaml:"env,omitempty"`
+	Bins          []string      `yaml:"bins,omitempty"`
+	UserInvocable bool          `yaml:"user_invocable,omitempty"`
+	Metadata      SkillMetadata `yaml:"metadata,omitempty"`
 }
 
-type SkillPrompt struct {
-	Name    string `json:"name"`
-	Prompt  string `json:"prompt"`
-	Pattern string `json:"pattern,omitempty"`
+type SkillMetadata struct {
+	Emoji                  string            `yaml:"emoji,omitempty"`
+	Requires               SkillRequirements `yaml:"requires,omitempty"`
+	PrimaryEnv             string            `yaml:"primaryEnv,omitempty"`
+	DisableModelInvocation bool              `yaml:"disable_model_invocation,omitempty"`
 }
 
-var (
-	skills   = make(map[string]*Skill)
-	skillsMu sync.RWMutex
-	loaded   bool
-)
+type SkillRequirements struct {
+	Env  []string `yaml:"env,omitempty"`
+	Bins []string `yaml:"bins,omitempty"`
+}
+
+type SkillEntry struct {
+	Enabled bool              `yaml:"enabled"`
+	APIKey  string            `yaml:"api_key,omitempty"`
+	Env     map[string]string `yaml:"env,omitempty"`
+}
+
+type SkillsConfig struct {
+	AllowBundled []string              `yaml:"allow_bundled,omitempty"`
+	Load         LoadConfig            `yaml:"load,omitempty"`
+	Install      InstallConfig         `yaml:"install,omitempty"`
+	Entries      map[string]SkillEntry `yaml:"entries,omitempty"`
+}
+
+type LoadConfig struct {
+	ExtraDirs       []string `yaml:"extra_dirs,omitempty"`
+	Watch           bool     `yaml:"watch,omitempty"`
+	WatchDebounceMs int      `yaml:"watch_debounce_ms,omitempty"`
+}
+
+type InstallConfig struct {
+	PreferBrew  bool   `yaml:"prefer_brew,omitempty"`
+	NodeManager string `yaml:"node_manager,omitempty"`
+}
+
+type LoadedSkill struct {
+	Metadata Skill
+	Content  string
+	Dir      string
+	FilePath string
+}
 
 func GetSkillsDir() string {
 	return filepath.Join(config.GetConfigDir(), "skills")
 }
 
-func LoadSkills() error {
-	if loaded {
-		return nil
-	}
-
-	skillsMu.Lock()
-	defer skillsMu.Unlock()
-
-	if err := loadBuiltinSkills(); err != nil {
-		return err
-	}
-
-	if err := loadGlobalSkills(); err != nil {
-		return err
-	}
-
-	loaded = true
-	return nil
+func GetSkillsDirForAgent(agentID string) string {
+	return filepath.Join(config.GetConfigDir(), "agents", agentID, "skills")
 }
 
-func loadBuiltinSkills() error {
-	builtinDir := filepath.Join(GetSkillsDir(), "builtin")
-	if err := os.MkdirAll(builtinDir, 0755); err != nil {
-		return err
-	}
-	return loadSkillsFromDir(builtinDir, "builtin")
-}
-
-func loadGlobalSkills() error {
-	globalDir := filepath.Join(GetSkillsDir(), "global")
-	if err := os.MkdirAll(globalDir, 0755); err != nil {
-		return err
-	}
-	return loadSkillsFromDir(globalDir, "global")
-}
-
-func loadSkillsFromDir(dir, source string) error {
-	entries, err := os.ReadDir(dir)
+func GetBundledSkillsDir() string {
+	execPath, err := os.Executable()
 	if err != nil {
-		if os.IsNotExist(err) {
-			return nil
-		}
-		return err
+		return ""
 	}
+	return filepath.Join(filepath.Dir(execPath), "skills")
+}
 
-	for _, entry := range entries {
-		if entry.IsDir() {
-			skillDir := filepath.Join(dir, entry.Name())
-			skill, err := loadSkillFromDir(skillDir, source)
-			if err != nil {
+func (s *LoadedSkill) GetInstructions() string {
+	lines := strings.Split(s.Content, "\n")
+	inContent := false
+	var resultLines []string
+	for _, line := range lines {
+		if len(line) >= 3 && line[:3] == "---" {
+			if !inContent {
+				inContent = true
 				continue
 			}
-			skills[skill.ID] = skill
+			break
+		}
+		if inContent {
+			resultLines = append(resultLines, line)
 		}
 	}
-	return nil
+	return strings.Join(resultLines, "\n")
 }
 
-func loadSkillFromDir(dir, source string) (*Skill, error) {
-	data, err := os.ReadFile(filepath.Join(dir, "skill.json"))
+func (s *LoadedSkill) GetBaseDir() string {
+	return s.Dir
+}
+
+func ParseSkillFromFile(filePath string) (*LoadedSkill, error) {
+	data, err := os.ReadFile(filePath)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("failed to read skill file: %w", err)
 	}
+
+	content := string(data)
 
 	var skill Skill
-	if err := json.Unmarshal(data, &skill); err != nil {
-		return nil, err
+	if err := yaml.Unmarshal([]byte(content), &skill); err != nil {
+		return nil, fmt.Errorf("failed to parse skill metadata: %w", err)
 	}
 
-	skill.Source = source
-
-	return &skill, nil
-}
-
-func LoadAgentSkills(agentID string) ([]Skill, error) {
-	skillsMu.RLock()
-	defer skillsMu.RUnlock()
-
-	agentSkillsDir := filepath.Join(config.GetConfigDir(), "agents", agentID, "skills")
-	data, err := os.ReadFile(filepath.Join(agentSkillsDir, "skills.json"))
-	if err != nil {
-		if os.IsNotExist(err) {
-			return []Skill{}, nil
-		}
-		return nil, err
+	if skill.Name == "" {
+		return nil, fmt.Errorf("skill name is required")
 	}
 
-	var skillIDs []string
-	if err := json.Unmarshal(data, &skillIDs); err != nil {
-		return nil, err
-	}
+	dir := filepath.Dir(filePath)
 
-	var result []Skill
-	for _, id := range skillIDs {
-		if s, ok := skills[id]; ok {
-			result = append(result, *s)
-		}
-	}
-
-	return result, nil
-}
-
-func SaveAgentSkills(agentID string, skillIDs []string) error {
-	agentSkillsDir := filepath.Join(config.GetConfigDir(), "agents", agentID, "skills")
-	if err := os.MkdirAll(agentSkillsDir, 0755); err != nil {
-		return err
-	}
-
-	data, err := json.MarshalIndent(skillIDs, "", "  ")
-	if err != nil {
-		return err
-	}
-
-	return os.WriteFile(filepath.Join(agentSkillsDir, "skills.json"), data, 0644)
-}
-
-func ListSkills() []Skill {
-	skillsMu.RLock()
-	defer skillsMu.RUnlock()
-
-	all := make([]Skill, 0, len(skills))
-	for _, s := range skills {
-		all = append(all, *s)
-	}
-	return all
-}
-
-func GetSkill(id string) (*Skill, bool) {
-	skillsMu.RLock()
-	defer skillsMu.RUnlock()
-	s, ok := skills[id]
-	return s, ok
-}
-
-func AddSkill(s Skill) error {
-	skillsMu.Lock()
-	defer skillsMu.Unlock()
-
-	if _, exists := skills[s.ID]; exists {
-		return fmt.Errorf("skill with id %s already exists", s.ID)
-	}
-
-	dir := filepath.Join(GetSkillsDir(), s.Source, s.ID)
-	if err := os.MkdirAll(dir, 0755); err != nil {
-		return err
-	}
-
-	data, err := json.MarshalIndent(s, "", "  ")
-	if err != nil {
-		return err
-	}
-
-	if err := os.WriteFile(filepath.Join(dir, "skill.json"), data, 0644); err != nil {
-		return err
-	}
-
-	skills[s.ID] = &s
-	return nil
-}
-
-func RemoveSkill(id string) error {
-	skillsMu.Lock()
-	defer skillsMu.Unlock()
-
-	s, exists := skills[id]
-	if !exists {
-		return fmt.Errorf("skill not found: %s", id)
-	}
-
-	dir := filepath.Join(GetSkillsDir(), s.Source, s.ID)
-	if err := os.RemoveAll(dir); err != nil {
-		return err
-	}
-
-	delete(skills, id)
-	return nil
-}
-
-func SearchSkills(query string) []Skill {
-	skillsMu.RLock()
-	defer skillsMu.RUnlock()
-
-	var result []Skill
-	query = strings.ToLower(query)
-
-	for _, s := range skills {
-		if strings.Contains(strings.ToLower(s.Name), query) ||
-			strings.Contains(strings.ToLower(s.Description), query) {
-			result = append(result, *s)
-		}
-	}
-
-	return result
+	return &LoadedSkill{
+		Metadata: skill,
+		Content:  content,
+		Dir:      dir,
+		FilePath: filePath,
+	}, nil
 }

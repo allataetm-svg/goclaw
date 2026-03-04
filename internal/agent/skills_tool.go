@@ -32,17 +32,6 @@ func (t *SkillsTool) Execute(ctx context.Context, args map[string]interface{}, c
 		return listSkills(args)
 	case "search":
 		return searchSkills(args)
-	case "add":
-		return addSkill(args)
-	case "remove":
-		skillID, _ := args["skill_id"].(string)
-		if skillID == "" {
-			return "", fmt.Errorf("missing skill_id")
-		}
-		if err := skills.RemoveSkill(skillID); err != nil {
-			return "", err
-		}
-		return "Skill removed successfully.", nil
 	case "enable":
 		return manageAgentSkill(args, true)
 	case "disable":
@@ -59,12 +48,12 @@ func listSkills(args map[string]interface{}) (string, error) {
 	}
 
 	agentID, _ := args["agent_id"].(string)
-	var enabledSkillIDs []string
+	var enabledSkillNames []string
 	if agentID != "" {
-		enabledSkills, err := skills.LoadAgentSkills(agentID)
+		enabledSkills, err := skills.LoadSkillsForAgent(agentID)
 		if err == nil {
 			for _, s := range enabledSkills {
-				enabledSkillIDs = append(enabledSkillIDs, s.ID)
+				enabledSkillNames = append(enabledSkillNames, s.Metadata.Name)
 			}
 		}
 	}
@@ -74,15 +63,13 @@ func listSkills(args map[string]interface{}) (string, error) {
 
 	for _, s := range skillList {
 		sb.WriteString(fmt.Sprintf("### %s\n", s.Name))
-		sb.WriteString(fmt.Sprintf("- ID: %s\n", s.ID))
 		sb.WriteString(fmt.Sprintf("- Description: %s\n", s.Description))
 		sb.WriteString(fmt.Sprintf("- Version: %s\n", s.Version))
-		sb.WriteString(fmt.Sprintf("- Source: %s\n", s.Source))
 
-		if len(enabledSkillIDs) > 0 {
+		if len(enabledSkillNames) > 0 {
 			enabled := false
-			for _, id := range enabledSkillIDs {
-				if id == s.ID {
+			for _, name := range enabledSkillNames {
+				if name == s.Name {
 					enabled = true
 					break
 				}
@@ -92,8 +79,8 @@ func listSkills(args map[string]interface{}) (string, error) {
 			}
 		}
 
-		if len(s.Tools) > 0 {
-			sb.WriteString(fmt.Sprintf("- Tools: %s\n", strings.Join(s.Tools, ", ")))
+		if len(s.Triggers) > 0 {
+			sb.WriteString(fmt.Sprintf("- Triggers: %s\n", strings.Join(s.Triggers, ", ")))
 		}
 		sb.WriteString("\n")
 	}
@@ -117,97 +104,36 @@ func searchSkills(args map[string]interface{}) (string, error) {
 
 	for _, s := range results {
 		sb.WriteString(fmt.Sprintf("### %s\n", s.Name))
-		sb.WriteString(fmt.Sprintf("- ID: %s\n", s.ID))
 		sb.WriteString(fmt.Sprintf("- Description: %s\n", s.Description))
-		sb.WriteString(fmt.Sprintf("- Source: %s\n", s.Source))
+		sb.WriteString(fmt.Sprintf("- Version: %s\n", s.Version))
 		sb.WriteString("\n")
 	}
 
 	return sb.String(), nil
 }
 
-func addSkill(args map[string]interface{}) (string, error) {
-	name, _ := args["name"].(string)
-	description, _ := args["description"].(string)
-	source, _ := args["source"].(string)
-
-	if name == "" {
-		return "", fmt.Errorf("missing name parameter")
-	}
-
-	if source == "" {
-		source = "global"
-	}
-
-	skill := skills.Skill{
-		ID:          fmt.Sprintf("skill_%s", strings.ToLower(strings.ReplaceAll(name, " ", "_"))),
-		Name:        name,
-		Description: description,
-		Version:     "1.0.0",
-		Source:      source,
-		Tools:       []string{},
-	}
-
-	if tools, ok := args["tools"].([]interface{}); ok {
-		for _, t := range tools {
-			if tStr, ok := t.(string); ok {
-				skill.Tools = append(skill.Tools, tStr)
-			}
-		}
-	}
-
-	if err := skills.AddSkill(skill); err != nil {
-		return "", err
-	}
-
-	return fmt.Sprintf("Skill '%s' added successfully.", name), nil
-}
-
 func manageAgentSkill(args map[string]interface{}, enable bool) (string, error) {
-	agentID, _ := args["agent_id"].(string)
+	name, _ := args["name"].(string)
 	skillID, _ := args["skill_id"].(string)
 
-	if agentID == "" || skillID == "" {
-		return "", fmt.Errorf("missing agent_id or skill_id")
+	if name == "" && skillID == "" {
+		return "", fmt.Errorf("missing name or skill_id parameter")
 	}
 
-	currentSkills, err := skills.LoadAgentSkills(agentID)
-	if err != nil {
-		return "", err
+	skillName := name
+	if skillName == "" {
+		skillName = skillID
 	}
 
-	var currentIDs []string
-	for _, s := range currentSkills {
-		currentIDs = append(currentIDs, s.ID)
-	}
-
-	exists := false
-	for _, id := range currentIDs {
-		if id == skillID {
-			exists = true
-			break
+	if enable {
+		if err := skills.EnableSkill(skillName); err != nil {
+			return "", err
 		}
-	}
-
-	if enable && !exists {
-		currentIDs = append(currentIDs, skillID)
-	} else if !enable && exists {
-		var newIDs []string
-		for _, id := range currentIDs {
-			if id != skillID {
-				newIDs = append(newIDs, id)
-			}
+		return fmt.Sprintf("Skill '%s' enabled.", skillName), nil
+	} else {
+		if err := skills.DisableSkill(skillName); err != nil {
+			return "", err
 		}
-		currentIDs = newIDs
+		return fmt.Sprintf("Skill '%s' disabled.", skillName), nil
 	}
-
-	if err := skills.SaveAgentSkills(agentID, currentIDs); err != nil {
-		return "", err
-	}
-
-	action := "enabled"
-	if !enable {
-		action = "disabled"
-	}
-	return fmt.Sprintf("Skill %s for agent %s.", skillID, action), nil
 }

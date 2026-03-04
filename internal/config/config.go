@@ -28,6 +28,31 @@ type Config struct {
 	MaxTokens      int              `json:"max_tokens,omitempty"`
 	PairingEnabled bool             `json:"pairing_enabled,omitempty"`
 	AllowedUsers   []string         `json:"allowed_users,omitempty"` // Whitelist of FromIDs
+	Skills         SkillsConfig     `json:"skills,omitempty"`
+}
+
+type SkillsConfig struct {
+	AllowBundled []string              `json:"allow_bundled,omitempty"`
+	Load         SkillsLoadConfig      `json:"load,omitempty"`
+	Install      SkillsInstallConfig   `json:"install,omitempty"`
+	Entries      map[string]SkillEntry `json:"entries,omitempty"`
+}
+
+type SkillsLoadConfig struct {
+	ExtraDirs       []string `json:"extra_dirs,omitempty"`
+	Watch           bool     `json:"watch,omitempty"`
+	WatchDebounceMs int      `json:"watch_debounce_ms,omitempty"`
+}
+
+type SkillsInstallConfig struct {
+	PreferBrew  bool   `json:"prefer_brew,omitempty"`
+	NodeManager string `json:"node_manager,omitempty"`
+}
+
+type SkillEntry struct {
+	Enabled bool              `json:"enabled"`
+	APIKey  string            `json:"api_key,omitempty"`
+	Env     map[string]string `json:"env,omitempty"`
 }
 
 func GetConfigDir() string {

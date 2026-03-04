@@ -16,6 +16,7 @@ import (
 	"github.com/allataetm-svg/goclaw/internal/provider"
 	"github.com/allataetm-svg/goclaw/internal/scheduler"
 	"github.com/allataetm-svg/goclaw/internal/sessions"
+	"github.com/allataetm-svg/goclaw/internal/skills"
 	"github.com/allataetm-svg/goclaw/internal/tui"
 )
 
@@ -59,6 +60,8 @@ func main() {
 		manage.Run()
 	case "pairing":
 		handlePairingCommand()
+	case "skills":
+		handleSkillsCommand()
 	case "help":
 		printUsage()
 	default:
@@ -78,12 +81,14 @@ Available Commands:
   gateway - Starts the multi-channel gateway (Telegram, Console, etc.).
   manage  - Opens the interactive agent/channel management dashboard.
   pairing - Manages user authorizations (approve <channel> <userID> <code>).
+  skills  - Manage skills (list, create, show, enable, disable).
   help    - Shows this help message.
 
 Example Usage:
   ./goclaw onboard
   ./goclaw cli
   ./goclaw gateway
+  ./goclaw skills list
   ./goclaw pairing approve Telegram 123456 000000`)
 }
 
@@ -465,5 +470,72 @@ func handlePairingCommand() {
 		fmt.Printf("❌ Approval failed: %v\n", err)
 	} else {
 		fmt.Printf("✅ User %s successfully approved and added to whitelist.\n", userID)
+	}
+}
+
+func handleSkillsCommand() {
+	if len(os.Args) < 3 {
+		fmt.Println(`Usage: goclaw skills <command> [args]
+
+Commands:
+  list                      - List all available skills
+  list <agent_id>           - List skills for a specific agent
+  create <name> <desc>      - Create a new skill
+  show <name>               - Show skill details
+  enable <name>             - Enable a skill in config
+  disable <name>            - Disable a skill in config
+  dir                       - Show skills directory path
+
+Examples:
+  goclaw skills list
+  goclaw skills create my-skill "Does something useful"
+  goclaw skills show skill-creator
+  goclaw skills enable my-skill`)
+		return
+	}
+
+	sub := os.Args[2]
+	var err error
+
+	switch sub {
+	case "list":
+		if len(os.Args) >= 4 {
+			err = skills.ListAgentSkillsCLI(os.Args[3])
+		} else {
+			err = skills.ListSkillsCLI()
+		}
+	case "create":
+		if len(os.Args) < 5 {
+			fmt.Println("Usage: goclaw skills create <name> <description>")
+			return
+		}
+		err = skills.CreateSkill(os.Args[3], os.Args[4])
+	case "show":
+		if len(os.Args) < 4 {
+			fmt.Println("Usage: goclaw skills show <name>")
+			return
+		}
+		err = skills.ShowSkill(os.Args[3])
+	case "enable":
+		if len(os.Args) < 4 {
+			fmt.Println("Usage: goclaw skills enable <name>")
+			return
+		}
+		err = skills.EnableSkill(os.Args[3])
+	case "disable":
+		if len(os.Args) < 4 {
+			fmt.Println("Usage: goclaw skills disable <name>")
+			return
+		}
+		err = skills.DisableSkill(os.Args[3])
+	case "dir":
+		fmt.Println(skills.GetSkillsDirPath())
+	default:
+		fmt.Printf("Unknown skills command: %s\n", sub)
+		fmt.Println("Run 'goclaw skills' for usage information")
+	}
+
+	if err != nil {
+		fmt.Printf("Error: %v\n", err)
 	}
 }
