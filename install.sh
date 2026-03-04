@@ -1,95 +1,106 @@
 #!/bin/bash
 
-# GoClaw Clean Install Script
+set -e
 
-echo "🦞 GoClaw Kurulum Scripti"
+echo "🦞 GoClaw Installer"
+echo "===================="
 
-# Platform detection
-ARCH=$(uname -m)
+# Detect OS and Arch
 OS=$(uname -s)
+ARCH=$(uname -m)
 
-case "$OS" in
-    Linux)
-        case "$ARCH" in
-            x86_64|amd64) PLATFORM="linux-amd64" ;;
-            aarch64|arm64) PLATFORM="linux-arm64" ;;
-            *) echo "Desteklenmeyen mimari: $ARCH"; exit 1 ;;
-        esac
-        ;;
-    Darwin)
-        case "$ARCH" in
-            x86_64|amd64) PLATFORM="darwin-amd64" ;;
-            aarch64|arm64) PLATFORM="darwin-arm64" ;;
-            *) echo "Desteklenmeyen mimari: $ARCH"; exit 1 ;;
-        esac
-        ;;
-    *)
-        echo "Desteklenmeyen işletim sistemi: $OS"
-        exit 1
-        ;;
-esac
+echo "Detected: $OS ($ARCH)"
 
-echo "Platform: $PLATFORM"
+# Determine package manager
+if command -v apt-get &> /dev/null; then
+    PKG_MGR="apt"
+elif command -v dnf &> /dev/null; then
+    PKG_MGR="dnf"
+elif command -v yum &> /dev/null; then
+    PKG_MGR="yum"
+elif command -v brew &> /dev/null; then
+    PKG_MGR="brew"
+elif command -v pacman &> /dev/null; then
+    PKG_MGR="pacman"
+else
+    PKG_MGR="none"
+fi
+
+echo "Package manager: $PKG_MGR"
+
+# Install Go if not present
+if ! command -v go &> /dev/null; then
+    echo "Installing Go..."
+    case $PKG_MGR in
+        apt)
+            sudo apt-get update
+            sudo apt-get install -y golang-go
+            ;;
+        dnf)
+            sudo dnf install -y golang
+            ;;
+        yum)
+            sudo yum install -y golang
+            ;;
+        brew)
+            brew install go
+            ;;
+        pacman)
+            sudo pacman -S --noconfirm go
+            ;;
+        none)
+            echo "No package manager found. Please install Go manually: https://go.dev/dl/"
+            exit 1
+            ;;
+    esac
+fi
+
+echo "Go version: $(go version)"
+
+# Create config directory
+CONFIG_DIR="$HOME/.goclaw"
+mkdir -p "$CONFIG_DIR"
 
 # Detect install location
 if [ -w /usr/local/bin ]; then
     INSTALL_DIR="/usr/local/bin"
-    SUDO=""
-elif [ -w "$HOME/bin" ]; then
-    INSTALL_DIR="$HOME/bin"
-    SUDO=""
+elif [ -w "$HOME/.local/bin" ]; then
+    INSTALL_DIR="$HOME/.local/bin"
 else
-    INSTALL_DIR="/usr/local/bin"
-    SUDO="sudo"
+    INSTALL_DIR="$HOME/.local/bin"
+    mkdir -p "$INSTALL_DIR"
 fi
 
-echo "Kurulum dizini: $INSTALL_DIR"
+echo "Installing to: $INSTALL_DIR"
 
-# Remove old goclaw
-echo "Eski goclaw kaldırılıyor..."
-rm -f "$INSTALL_DIR/goclaw" 2>/dev/null || true
-rm -f ./goclaw 2>/dev/null || true
+# Build from source
+echo "Building GoClaw..."
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 
-# Download new binary
-echo "Yeni goclaw indiriliyor..."
-URL="https://raw.githubusercontent.com/allataetm-svg/goclaw/feature/enhanced-memory-system/goclaw-${PLATFORM}"
-echo "URL: $URL"
-
-if ! curl -fSL -o goclaw "$URL"; then
-    echo "❌ İndirme başarısız!"
-    echo "Alternatif olarak şunu deneyin:"
-    echo "  wget -O goclaw '$URL'"
-    exit 1
-fi
-
-# Make executable
-chmod +x goclaw
-
-# Verify file
-echo "İndirilen dosya kontrol ediliyor..."
-if [ ! -s goclaw ]; then
-    echo "❌ İndirilen dosya boş veya hatalı"
-    exit 1
-fi
-
-FILE_TYPE=$(file goclaw)
-echo "Dosya tipi: $FILE_TYPE"
-
-# Install
-echo "Kuruluyor..."
-if ! $SUDO mv goclaw "$INSTALL_DIR/goclaw"; then
-    echo "❌ Kurulum başarısız - izinleri kontrol edin"
-    exit 1
-fi
-
-# Verify
-echo "Doğrulanıyor..."
-if "$INSTALL_DIR/goclaw" --help > /dev/null 2>&1; then
-    echo "✅ GoClaw başarıyla kuruldu!"
-    echo ""
-    "$INSTALL_DIR/goclaw" --help
+if [ -d "$SCRIPT_DIR/.git" ]; then
+    cd "$SCRIPT_DIR"
+    GOOS=$OS GOARCH=$ARCH go build -o "$INSTALL_DIR/goclaw" .
 else
-    echo "❌ Doğrulama başarısız"
-    echo "Dosya tipi: $(file $INSTALL_DIR/goclaw)"
-    exit 1
+    # Download latest release
+    echo "Downloading latest release..."
+    curl -sL "https://api.github.com/repos/allataetm-svg/goclaw/releases/latest" | grep -o '"browser_download_url": *"[^"]*'"${OS}"'-'"${ARCH}"'" | cut -d'"' -f4 | xargs -I {} curl -sL -o "$INSTALL_DIR/goclaw" {}
+    chmod +x "$INSTALL_DIR/goclaw"
 fi
+
+# Add to PATH
+SHELL_RC="$HOME/.bashrc"
+[ -f "$HOME/.zshrc" ] && SHELL_RC="$HOME/.zshrc"
+[ -f "$HOME/.profile" ] && SHELL_RC="$HOME/.profile"
+
+if ! grep -q "goclaw" "$SHELL_RC" 2>/dev/null; then
+    echo 'export PATH="$PATH:$HOME/.local/bin"' >> "$SHELL_RC"
+    echo "Added to PATH in $SHELL_RC"
+fi
+
+echo ""
+echo "✅ GoClaw installed!"
+echo ""
+echo "Next steps:"
+echo "  source $SHELL_RC"
+echo "  goclaw onboard"
+echo ""
