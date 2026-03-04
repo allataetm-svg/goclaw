@@ -45,15 +45,36 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" 2>/dev/null && pwd)"
 
 if [ -d "$SCRIPT_DIR/.git" ]; then
     cd "$SCRIPT_DIR"
+    echo "Building from source..."
     GOOS=$OS GOARCH=$ARCH go build -o "$INSTALL_DIR/goclaw" .
 else
-    echo "Downloading latest release..."
-    DOWNLOAD_URL=$(curl -sL "https://api.github.com/repos/allataetm-svg/goclaw/releases/latest" | grep -o "browser_download_url.*goclaw-${OS}-${ARCH}" | head -1 | cut -d'"' -f4)
+    echo "Downloading prebuilt binary..."
+    if [ "$ARCH" = "x86_64" ] || [ "$ARCH" = "amd64" ]; then
+        BIN_ARCH="amd64"
+    elif [ "$ARCH" = "aarch64" ] || [ "$ARCH" = "arm64" ]; then
+        BIN_ARCH="arm64"
+    else
+        BIN_ARCH="$ARCH"
+    fi
+    
+    OS_LOWER=$(echo "$OS" | tr '[:upper:]' '[:lower:]')
+    BINARY_NAME="goclaw-${OS_LOWER}-${BIN_ARCH}"
+    
+    API_URL="https://api.github.com/repos/allataetm-svg/goclaw/releases/latest"
+    DOWNLOAD_URL=$(curl -sL "$API_URL" | grep -o "\"browser_download_url\":\"[^\"]*${BINARY_NAME}[^\"]*\"" | cut -d'"' -f4 | head -1)
+    
     if [ -n "$DOWNLOAD_URL" ]; then
+        echo "Downloading: $DOWNLOAD_URL"
         curl -sL "$DOWNLOAD_URL" -o "$INSTALL_DIR/goclaw"
         chmod +x "$INSTALL_DIR/goclaw"
     else
-        echo "No prebuilt binary for $OS-$ARCH. Building from source requires git clone."
+        echo "❌ No prebuilt binary available for $OS-$ARCH"
+        echo ""
+        echo "To build from source:"
+        echo "  git clone https://github.com/allataetm-svg/goclaw.git"
+        echo "  cd goclaw"
+        echo "  go build -o goclaw ."
+        echo ""
         exit 1
     fi
 fi
